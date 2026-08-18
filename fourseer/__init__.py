@@ -18,6 +18,7 @@ Public surface is re-exported here; submodules:
   - fourseer.cli      : the `fourseer` entrypoint
 """
 
+from fourseer.drift import detect_issue_drift, extract_closed_issues, render_issue_drift
 from fourseer.load import load_run
 from fourseer.models import (
     BuildOrderRow,
@@ -28,6 +29,7 @@ from fourseer.models import (
     CycleMetrics,
     CycleRecord,
     GateLog,
+    IssueDrift,
     Run,
     RunSummary,
     TaxonomySummary,
@@ -65,6 +67,7 @@ __all__ = [
     "ConsistencyIssue",
     "RunSummary",
     "TaxonomySummary",
+    "IssueDrift",
     # loaders
     "load_run",
     # report
@@ -80,6 +83,10 @@ __all__ = [
     "classify_run",
     "summarize_taxonomy",
     "render_taxonomy",
+    # drift
+    "extract_closed_issues",
+    "detect_issue_drift",
+    "render_issue_drift",
     # parsers
     "load_trajectories",
     "parse_cycles_out",

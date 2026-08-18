@@ -17,6 +17,7 @@ Models
 - :class:`CycleMetrics`    — per-cycle metrics (report output).
 - :class:`RunSummary`      — run-level totals aggregated from per-cycle metrics.
 - :class:`CycleClassification` — one cycle's failure-mode classification (taxonomy output).
+- :class:`IssueDrift`       — one closed-in-commits-but-still-open issue (drift output).
 
 Field semantics are documented per-field. Where a source artifact may omit a
 value (e.g. a wall-clock-killed cycle that never wrote an ``OUTER`` line), the
@@ -465,3 +466,36 @@ class TaxonomySummary:
     gate_unknown: int = 0
     merged_counts: dict[str, int] = field(default_factory=dict)
     merged_unknown: int = 0
+
+
+@dataclass(frozen=True)
+class IssueDrift:
+    """One issue that a commit claims to have closed but that is still open.
+
+    A pure, hashable, comparable value object describing a single
+    closed-in-commits-but-still-open issue, produced by
+    :func:`fourseer.drift.detect_issue_drift`. It is the per-issue row of the
+    drift diff: the issue number plus the *first* commit (in ``git log`` order)
+    that references it with a closing keyword.
+
+    Attributes
+    ----------
+    issue_no:
+        The integer issue number (e.g. ``42`` for ``#42``).
+    commit_hash:
+        The full 40-char hash of the first referencing commit (the commit
+        ``git log`` lists first that carries a closing reference to this
+        issue).
+    commit_message:
+        The subject line of that first referencing commit (the commit's
+        ``%s`` line, i.e. the one-line summary).
+    code:
+        A stable machine tag (snake_case) identifying the drift kind. Defaults
+        to ``"closed_but_still_open"`` — the issue is referenced as closed by a
+        commit yet is still open.
+    """
+
+    issue_no: int
+    commit_hash: str
+    commit_message: str
+    code: str = "closed_but_still_open"
