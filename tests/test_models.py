@@ -15,6 +15,7 @@ from fourseer.models import (
     CommitRecord,
     ConsistencyIssue,
     CycleBlock,
+    CycleMetrics,
     CycleRecord,
     GateLog,
     Trajectory,
@@ -145,6 +146,65 @@ def test_consistency_issue_hashable_and_equal() -> None:
     """Two identical ConsistencyIssue instances compare equal and hash equal."""
     a = ConsistencyIssue(code="c", cycle_no=1, detail="d")
     b = ConsistencyIssue(code="c", cycle_no=1, detail="d")
+    assert a == b
+    assert hash(a) == hash(b)
+    assert len({a, b}) == 1
+
+
+def test_cycle_metrics_fields() -> None:
+    """CycleMetrics carries all five fields with the given values."""
+    m = CycleMetrics(
+        cycle_no=7,
+        outcome="max_steps_reached",
+        step_count=82,
+        duration_seconds=3505,
+        trajectory_name="trajectory_0013.json",
+    )
+    assert m.cycle_no == 7
+    assert m.outcome == "max_steps_reached"
+    assert m.step_count == 82
+    assert m.duration_seconds == 3505
+    assert m.trajectory_name == "trajectory_0013.json"
+
+
+def test_cycle_metrics_kill_shape() -> None:
+    """A wall-clock kill: outcome None, step_count 0, trajectory_name None."""
+    m = CycleMetrics(
+        cycle_no=21,
+        outcome=None,
+        step_count=0,
+        duration_seconds=3600,
+        trajectory_name=None,
+    )
+    assert m.outcome is None
+    assert m.step_count == 0
+    assert m.trajectory_name is None
+
+
+def test_cycle_metrics_last_cycle_duration_none() -> None:
+    """The last cycle has duration_seconds None (no following start)."""
+    m = CycleMetrics(
+        cycle_no=28,
+        outcome="exit:task_complete",
+        step_count=39,
+        duration_seconds=None,
+        trajectory_name="trajectory_0043.json",
+    )
+    assert m.duration_seconds is None
+
+
+def test_cycle_metrics_is_frozen() -> None:
+    """CycleMetrics is a frozen dataclass: mutation raises."""
+    m = CycleMetrics(1, "x", 2, 3, "t")
+    assert dataclasses.is_dataclass(m)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        m.cycle_no = 99
+
+
+def test_cycle_metrics_hashable_and_equal() -> None:
+    """Two identical CycleMetrics compare equal and hash equal."""
+    a = CycleMetrics(7, "max_steps_reached", 82, 3505, "trajectory_0013.json")
+    b = CycleMetrics(7, "max_steps_reached", 82, 3505, "trajectory_0013.json")
     assert a == b
     assert hash(a) == hash(b)
     assert len({a, b}) == 1

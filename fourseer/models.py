@@ -14,6 +14,7 @@ Models
 - :class:`GateLog`         — the whole gate log: build order + cycle blocks.
 - :class:`CommitRecord`    — one commit from ``git log``.
 - :class:`ConsistencyIssue`— one cross-source inconsistency (validator output).
+- :class:`CycleMetrics`    — per-cycle metrics (report output).
 
 Field semantics are documented per-field. Where a source artifact may omit a
 value (e.g. a wall-clock-killed cycle that never wrote an ``OUTER`` line), the
@@ -270,3 +271,39 @@ class Run:
         file order.
         """
         return [c.cycle_no for c in self.cycles if c.outcome is None]
+
+
+@dataclass(frozen=True)
+class CycleMetrics:
+    """Per-cycle metrics for one outer-loop cycle (a pure value object).
+
+    Produced by :func:`fourseer.report.build_cycle_metrics`. It joins a
+    :class:`CycleRecord` with the :class:`Trajectory` it references (by
+    trajectory basename) and derives the wall-clock duration of the cycle from
+    the gap between this cycle's start timestamp and the next cycle's start
+    timestamp (with a midnight wrap).
+
+    Attributes
+    ----------
+    cycle_no:
+        The integer cycle number (from the ``CycleRecord``).
+    outcome:
+        The ``CycleRecord.outcome`` value, or ``None`` for a wall-clock-killed
+        cycle that never wrote an ``OUTER`` line.
+    step_count:
+        The joined trajectory's ``step_count``, or ``0`` when no trajectory is
+        joined (a kill, or an orphaned path).
+    duration_seconds:
+        Wall-clock seconds between this cycle's start and the next cycle's
+        start (midnight-wrapped), or ``None`` for the last cycle in file order
+        (no following start) or when not computable.
+    trajectory_name:
+        The joined ``Trajectory.name`` (source basename), or ``None`` when no
+        trajectory is joined.
+    """
+
+    cycle_no: int
+    outcome: str | None
+    step_count: int
+    duration_seconds: int | None
+    trajectory_name: str | None
