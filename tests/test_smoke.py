@@ -32,3 +32,15 @@ def test_public_api_reexports_validation() -> None:
 
     assert "ConsistencyIssue" in fourseer.__all__
     assert "validate_run" in fourseer.__all__
+
+
+def test_public_api_reexports_report() -> None:
+    """CycleMetrics and build_cycle_metrics are importable and in __all__."""
+    from fourseer import CycleMetrics, build_cycle_metrics
+
+    assert CycleMetrics is not None
+    assert build_cycle_metrics is not None
+    import fourseer
+
+    assert "CycleMetrics" in fourseer.__all__
+    assert "build_cycle_metrics" in fourseer.__all__
