@@ -8,11 +8,18 @@ The gate log is a single markdown file with two machine-relevant sections:
 2. ``## Cycle N`` — one block per executed cycle. The header is
    ``## Cycle N: <title>`` (the title may be absent, e.g. ``## Cycle 1 — Pending``).
    The body carries optional ``**Date:**``, ``**HEAD (start):**`` and
-   ``**HEAD (end):**`` fields and an optional ``### Lessons`` numbered list.
-   Each block becomes a :class:`~fourseer.models.CycleBlock`.
+   ``**HEAD (end):**`` fields, an optional ``### Results`` markdown table, and an
+   optional ``### Lessons`` numbered list. Each block becomes a
+   :class:`~fourseer.models.CycleBlock`.
 
-Parsing is pure and deterministic. Only the structured fields above are
-extracted; free-form prose (``### What We Did``, ``### Results``) is ignored.
+From the ``### Results`` table the parser captures two rows when present: the
+``Gate (build+test+lint)`` row's ``After`` cell (lowercased to ``"green"`` /
+``"red"``) and the ``Merged on main`` row's ``After`` cell (``True`` when it
+carries a commit hash / PR reference, ``False`` when it is an em-dash or empty).
+A block with no ``### Results`` table leaves both ``None``.
+
+Parsing is pure and deterministic. The remaining free-form prose (``### What We
+Did``) is ignored.
 """
 
 from __future__ import annotations
@@ -30,9 +37,13 @@ _HEAD_START_RE = re.compile(r"^\*\*HEAD \(start\):\*\*\s*(?P<val>.+?)\s*$")
 _HEAD_END_RE = re.compile(r"^\*\*HEAD \(end\):\*\*\s*(?P<val>.+?)\s*$")
 _LESSONS_HEADER_RE = re.compile(r"^###\s+Lessons\b")
 _LESSON_ITEM_RE = re.compile(r"^\s*\d+\.\s+(?P<val>.+?)\s*$")
+_RESULTS_HEADER_RE = re.compile(r"^###\s+Results\b")
 _BUILD_ORDER_HEADER_RE = re.compile(r"^##\s+Build Order\b")
 _TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$")
 _TABLE_SEP_RE = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
+
+# A "Merged on main" After cell that is one of these means "not merged".
+_MERGED_ABSENT = {"", "—", "–", "-"}
 
 
 def parse_gate_log(text: str) -> GateLog:
@@ -73,16 +84,28 @@ def _parse_build_order(lines: list[str]) -> list[BuildOrderRow]:
     return rows
 
 
+def _parse_merged_cell(after: str) -> bool:
+    """Interpret a ``Merged on main`` ``After`` cell as a merge flag.
+
+    ``True`` when the cell carries a commit hash / PR reference (any non-empty
+    value that is not an em-dash / hyphen placeholder); ``False`` when it is an
+    em-dash, hyphen, or empty.
+    """
+    return after.strip() not in _MERGED_ABSENT
+
+
 def _parse_cycle_blocks(lines: list[str]) -> list[CycleBlock]:
     """Extract every ``## Cycle N`` block with its structured fields.
 
     A mutable dict accumulator is used while scanning (the model is frozen),
     and a :class:`CycleBlock` is materialized when the next block begins or at
-    end of input.
+    end of input. The ``### Results`` table's ``Gate (build+test+lint)`` and
+    ``Merged on main`` rows are captured into ``gate_after`` / ``merged``.
     """
     blocks: list[CycleBlock] = []
     current: dict | None = None
     in_lessons = False
+    in_results = False
 
     def _flush() -> None:
         nonlocal current
@@ -95,6 +118,8 @@ def _parse_cycle_blocks(lines: list[str]) -> list[CycleBlock]:
                     head_start=current["head_start"],
                     head_end=current["head_end"],
                     lessons=current["lessons"],
+                    gate_after=current["gate_after"],
+                    merged=current["merged"],
                 )
             )
             current = None
@@ -113,8 +138,11 @@ def _parse_cycle_blocks(lines: list[str]) -> list[CycleBlock]:
                 "head_start": None,
                 "head_end": None,
                 "lessons": [],
+                "gate_after": None,
+                "merged": None,
             }
             in_lessons = False
+            in_results = False
             continue
 
         if current is None:
@@ -122,6 +150,12 @@ def _parse_cycle_blocks(lines: list[str]) -> list[CycleBlock]:
 
         if _LESSONS_HEADER_RE.match(line):
             in_lessons = True
+            in_results = False
+            continue
+
+        if _RESULTS_HEADER_RE.match(line):
+            in_results = True
+            in_lessons = False
             continue
 
         if in_lessons:
@@ -142,6 +176,25 @@ def _parse_cycle_blocks(lines: list[str]) -> list[CycleBlock]:
             else:
                 # A non-item, non-blank line before any lesson ends the section.
                 in_lessons = False
+
+        if in_results:
+            # A new "### " section header (other than Results) ends the table.
+            if line.startswith("###"):
+                in_results = False
+                continue
+            row_match = _TABLE_ROW_RE.match(line)
+            if row_match is not None and not _TABLE_SEP_RE.match(line):
+                cells = [c.strip() for c in row_match.group(1).split("|")]
+                if len(cells) >= 3:
+                    label = cells[0].lower()
+                    after = cells[2]
+                    if label == "gate (build+test+lint)":
+                        low = after.lower()
+                        if low in ("green", "red"):
+                            current["gate_after"] = low
+                    elif label == "merged on main":
+                        current["merged"] = _parse_merged_cell(after)
+            continue
 
         if not in_lessons:
             dm = _DATE_RE.match(line)
