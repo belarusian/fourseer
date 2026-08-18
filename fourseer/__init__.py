@@ -22,6 +22,7 @@ from fourseer.models import (
     CommitRecord,
     ConsistencyIssue,
     CycleBlock,
+    CycleMetrics,
     CycleRecord,
     GateLog,
     Run,
@@ -33,6 +34,7 @@ from fourseer.parse import (
     parse_gate_log,
     read_git_history,
 )
+from fourseer.report import build_cycle_metrics
 from fourseer.validate import validate_run
 
 __version__ = "0.1.0"
@@ -41,6 +43,7 @@ __all__ = [
     # models
     "Trajectory",
     "CycleRecord",
+    "CycleMetrics",
     "BuildOrderRow",
     "CycleBlock",
     "GateLog",
@@ -49,6 +52,8 @@ __all__ = [
     "ConsistencyIssue",
     # loaders
     "load_run",
+    # report
+    "build_cycle_metrics",
     # validation
     "validate_run",
     # parsers
