@@ -20,3 +20,15 @@ def test_public_api_reexports() -> None:
 
     assert "Run" in fourseer.__all__
     assert "load_run" in fourseer.__all__
+
+
+def test_public_api_reexports_validation() -> None:
+    """ConsistencyIssue and validate_run are importable and in __all__."""
+    from fourseer import ConsistencyIssue, validate_run
+
+    assert ConsistencyIssue is not None
+    assert validate_run is not None
+    import fourseer
+
+    assert "ConsistencyIssue" in fourseer.__all__
+    assert "validate_run" in fourseer.__all__
