@@ -8,18 +8,21 @@ drift (issue drift + plan drift).
 Public surface is re-exported here; submodules:
   - fourseer.models   : typed dataclasses for the parsed artifacts
   - fourseer.parse    : artifact parsers (trajectories, cycles.out, gate log, git)
+  - fourseer.load     : top-level loader (composes the four parsers into a Run)
   - fourseer.report   : per-cycle metrics
   - fourseer.taxonomy : failure-mode classification
   - fourseer.drift    : issue + plan drift detection
   - fourseer.cli      : the `fourseer` entrypoint
 """
 
+from fourseer.load import load_run
 from fourseer.models import (
     BuildOrderRow,
     CommitRecord,
     CycleBlock,
     CycleRecord,
     GateLog,
+    Run,
     Trajectory,
 )
 from fourseer.parse import (
@@ -39,6 +42,9 @@ __all__ = [
     "CycleBlock",
     "GateLog",
     "CommitRecord",
+    "Run",
+    # loaders
+    "load_run",
     # parsers
     "load_trajectories",
     "parse_cycles_out",

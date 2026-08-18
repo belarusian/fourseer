@@ -1,4 +1,4 @@
-"""Smoke test: the fourseer package imports cleanly."""
+"""Smoke test: the fourseer package imports cleanly and exposes its public API."""
 
 
 def test_import_fourseer() -> None:
@@ -8,3 +8,15 @@ def test_import_fourseer() -> None:
     assert hasattr(fourseer, "__version__")
     assert isinstance(fourseer.__version__, str)
     assert fourseer.__version__
+
+
+def test_public_api_reexports() -> None:
+    """Run and load_run are importable from the package root and in __all__."""
+    from fourseer import Run, load_run
+
+    assert Run is not None
+    assert load_run is not None
+    import fourseer
+
+    assert "Run" in fourseer.__all__
+    assert "load_run" in fourseer.__all__
