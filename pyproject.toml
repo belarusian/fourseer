@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fourseer"
+version = "0.1.0"
+description = "Loop intelligence for the four pipeline: parse, report, taxonomy, drift."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "fourseer" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.1.0", "mypy>=1.0"]
+
+[project.scripts]
+fourseer = "fourseer.cli:main"
+
+[tool.setuptools]
+packages = ["fourseer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+strict = false
