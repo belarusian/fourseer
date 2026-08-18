@@ -15,6 +15,7 @@ Models
 - :class:`CommitRecord`    — one commit from ``git log``.
 - :class:`ConsistencyIssue`— one cross-source inconsistency (validator output).
 - :class:`CycleMetrics`    — per-cycle metrics (report output).
+- :class:`RunSummary`      — run-level totals aggregated from per-cycle metrics.
 
 Field semantics are documented per-field. Where a source artifact may omit a
 value (e.g. a wall-clock-killed cycle that never wrote an ``OUTER`` line), the
@@ -307,3 +308,52 @@ class CycleMetrics:
     step_count: int
     duration_seconds: int | None
     trajectory_name: str | None
+
+@dataclass(frozen=True)
+class RunSummary:
+    """Run-level totals aggregated from a run's per-cycle :class:`CycleMetrics`.
+
+    A pure, hashable, comparable value object that rolls a whole run's
+    per-cycle metrics up into a single aggregate a consumer (CLI, taxonomy,
+    drift) can hold. Produced by :func:`fourseer.report.summarize_run`.
+
+    Invariant
+    ---------
+    ``completed_count + killed_count == cycle_count``: every cycle either
+    wrote an ``OUTER`` outcome (completed) or was wall-clock-killed before
+    writing one (killed), so the two counts partition the total.
+
+    Attributes
+    ----------
+    cycle_count:
+        The total number of cycles (``len(metrics)``).
+    completed_count:
+        The number of cycles with a non-``None`` ``outcome`` (a completed run).
+    killed_count:
+        The number of cycles with ``outcome is None`` (a wall-clock kill).
+    total_steps:
+        The sum of every cycle's ``step_count`` (``0`` when there are no
+        cycles).
+    total_duration_seconds:
+        The sum of the non-``None`` ``duration_seconds`` values (``0`` when no
+        cycle carries a duration, e.g. a single-cycle run).
+    cycles_with_duration:
+        The number of cycles whose ``duration_seconds`` is non-``None``.
+    total_tokens:
+        The summed token count across the DISTINCT trajectories the run's
+        cycles reference, or ``None`` when no referenced trajectory carries a
+        usage record (or when no trajectories were supplied).
+    total_cost:
+        The summed cost across the DISTINCT trajectories the run's cycles
+        reference, or ``None`` when no referenced trajectory carries a usage
+        record (or when no trajectories were supplied).
+    """
+
+    cycle_count: int
+    completed_count: int
+    killed_count: int
+    total_steps: int
+    total_duration_seconds: int
+    cycles_with_duration: int
+    total_tokens: int | None
+    total_cost: float | None

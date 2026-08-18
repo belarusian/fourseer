@@ -56,3 +56,16 @@ def test_public_api_reexports_report_render() -> None:
 
     assert "render_report" in fourseer.__all__
     assert "extract_tokens_cost" in fourseer.__all__
+
+def test_public_api_reexports_run_summary() -> None:
+    """RunSummary, summarize_run, render_summary are importable and in __all__."""
+    from fourseer import RunSummary, render_summary, summarize_run
+
+    assert RunSummary is not None
+    assert summarize_run is not None
+    assert render_summary is not None
+    import fourseer
+
+    assert "RunSummary" in fourseer.__all__
+    assert "summarize_run" in fourseer.__all__
+    assert "render_summary" in fourseer.__all__

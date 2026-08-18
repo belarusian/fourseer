@@ -6,7 +6,10 @@ no-join, start-to-next duration, midnight wrap, last-cycle ``None`` duration,
 :func:`fourseer.report.render_report` (header, placeholder rendering, row
 order, determinism, no mutation), and
 :func:`fourseer.report.extract_tokens_cost` (conservative extraction, no
-false-positives on incidental prose). Most tests use small hand-built inline
+false-positives on incidental prose), :func:`fourseer.report.summarize_run`
+(run-level aggregation, join over the set of referenced trajectory names),
+and :func:`fourseer.report.render_summary` (deterministic block, ``-``
+placeholder for ``None`` tokens/cost). Most tests use small hand-built inline
 fixtures (not the full seed). Exactly one test per function exercises the real
 seed dataset via the ``seed_dir`` fixture.
 """
@@ -18,8 +21,14 @@ import copy
 import pytest
 
 from fourseer.load import load_run
-from fourseer.models import CycleMetrics, CycleRecord, Run, Trajectory
-from fourseer.report import build_cycle_metrics, extract_tokens_cost, render_report
+from fourseer.models import CycleMetrics, CycleRecord, Run, RunSummary, Trajectory
+from fourseer.report import (
+    build_cycle_metrics,
+    extract_tokens_cost,
+    render_report,
+    render_summary,
+    summarize_run,
+)
 
 
 def _metrics_by_cycle(run: Run) -> dict[int, CycleMetrics]:
@@ -316,3 +325,227 @@ def test_real_seed_report(seed_dir) -> None:
     data_rows = [l for l in lines if l.startswith("| ") and "Cycle" not in l
                  and "---" not in l]
     assert len(data_rows) == 22
+
+# ---------------------------------------------------------------------------
+# summarize_run
+# ---------------------------------------------------------------------------
+
+
+def _cm(cycle_no, outcome, step_count, duration_seconds, trajectory_name):
+    return CycleMetrics(
+        cycle_no=cycle_no,
+        outcome=outcome,
+        step_count=step_count,
+        duration_seconds=duration_seconds,
+        trajectory_name=trajectory_name,
+    )
+
+
+def test_summarize_run_empty_metrics() -> None:
+    """Empty metrics: all counts/sums zero, tokens/cost None."""
+    s = summarize_run([])
+    assert s == RunSummary(0, 0, 0, 0, 0, 0, None, None)
+
+
+def test_summarize_run_all_completed() -> None:
+    """Every cycle has a non-None outcome: completed_count == cycle_count."""
+    metrics = [
+        _cm(1, "exit:task_complete", 10, 100, "a.json"),
+        _cm(2, "max_steps_reached", 20, 200, "b.json"),
+    ]
+    s = summarize_run(metrics)
+    assert s.cycle_count == 2
+    assert s.completed_count == 2
+    assert s.killed_count == 0
+    assert s.total_steps == 30
+    assert s.total_duration_seconds == 300
+    assert s.cycles_with_duration == 2
+
+
+def test_summarize_run_all_killed() -> None:
+    """Every cycle has outcome None: killed_count == cycle_count."""
+    metrics = [
+        _cm(1, None, 0, 100, None),
+        _cm(2, None, 0, 200, None),
+        _cm(3, None, 0, None, None),
+    ]
+    s = summarize_run(metrics)
+    assert s.cycle_count == 3
+    assert s.completed_count == 0
+    assert s.killed_count == 3
+    assert s.total_steps == 0
+    assert s.total_duration_seconds == 300
+    assert s.cycles_with_duration == 2
+
+
+def test_summarize_run_mixed() -> None:
+    """A mix of completed and killed cycles partitions the total."""
+    metrics = [
+        _cm(1, "exit:task_complete", 10, 100, "a.json"),
+        _cm(2, None, 0, 200, None),
+        _cm(3, "max_steps_reached", 5, None, "b.json"),
+    ]
+    s = summarize_run(metrics)
+    assert s.cycle_count == 3
+    assert s.completed_count == 2
+    assert s.killed_count == 1
+    assert s.completed_count + s.killed_count == s.cycle_count
+    assert s.total_steps == 15
+    assert s.total_duration_seconds == 300
+    assert s.cycles_with_duration == 2
+
+
+def test_summarize_run_last_cycle_none_duration() -> None:
+    """A None duration (last cycle) is excluded from the sum and count."""
+    metrics = [
+        _cm(1, "x", 10, 100, "a.json"),
+        _cm(2, "x", 20, None, "b.json"),
+    ]
+    s = summarize_run(metrics)
+    assert s.total_duration_seconds == 100
+    assert s.cycles_with_duration == 1
+
+
+def test_summarize_run_trajectories_none() -> None:
+    """trajectories=None: tokens/cost are None even if metrics reference names."""
+    metrics = [_cm(1, "x", 10, 100, "a.json")]
+    s = summarize_run(metrics, None)
+    assert s.total_tokens is None
+    assert s.total_cost is None
+
+
+def test_summarize_run_joined_trajectory_with_usage() -> None:
+    """A referenced trajectory carrying a usage record contributes tokens/cost."""
+    metrics = [
+        _cm(1, "x", 10, 100, "a.json"),
+        _cm(2, "x", 20, 200, "b.json"),
+    ]
+    trajectories = [
+        Trajectory(outcome="x", step_count=10, name="a.json",
+                   messages=[{"role": "user", "content": "usage: tokens=100 cost=0.5"}]),
+        Trajectory(outcome="x", step_count=20, name="b.json",
+                   messages=[{"role": "user", "content": "usage: tokens=200 cost=0.25"}]),
+    ]
+    s = summarize_run(metrics, trajectories)
+    assert s.total_tokens == 300
+    assert s.total_cost == pytest.approx(0.75)
+
+
+def test_summarize_run_referenced_by_two_cycles_counted_once() -> None:
+    """A trajectory referenced by two cycles contributes its tokens/cost ONCE."""
+    metrics = [
+        _cm(1, "x", 10, 100, "a.json"),
+        _cm(2, "x", 20, 200, "a.json"),
+    ]
+    trajectories = [
+        Trajectory(outcome="x", step_count=10, name="a.json",
+                   messages=[{"role": "user", "content": "usage: tokens=100 cost=0.5"}]),
+    ]
+    s = summarize_run(metrics, trajectories)
+    assert s.total_tokens == 100
+    assert s.total_cost == pytest.approx(0.5)
+
+
+def test_summarize_run_unreferenced_trajectory_not_counted() -> None:
+    """A trajectory in the list but referenced by no cycle contributes nothing."""
+    metrics = [_cm(1, "x", 10, 100, "a.json")]
+    trajectories = [
+        Trajectory(outcome="x", step_count=10, name="a.json",
+                   messages=[{"role": "user", "content": "usage: tokens=100 cost=0.5"}]),
+        Trajectory(outcome="x", step_count=99, name="orphan.json",
+                   messages=[{"role": "user", "content": "usage: tokens=999 cost=9.9"}]),
+    ]
+    s = summarize_run(metrics, trajectories)
+    assert s.total_tokens == 100
+    assert s.total_cost == pytest.approx(0.5)
+
+
+def test_summarize_run_no_usage_records_yields_none() -> None:
+    """Referenced trajectories without usage records: tokens/cost stay None."""
+    metrics = [_cm(1, "x", 10, 100, "a.json")]
+    trajectories = [
+        Trajectory(outcome="x", step_count=10, name="a.json",
+                   messages=[{"role": "user", "content": "no usage here"}]),
+    ]
+    s = summarize_run(metrics, trajectories)
+    assert s.total_tokens is None
+    assert s.total_cost is None
+
+
+def test_summarize_run_deterministic_and_no_mutation() -> None:
+    """summarize_run is deterministic and never mutates its inputs."""
+    metrics = [
+        _cm(1, "x", 10, 100, "a.json"),
+        _cm(2, None, 0, 200, None),
+    ]
+    trajectories = [
+        Trajectory(outcome="x", step_count=10, name="a.json",
+                   messages=[{"role": "user", "content": "usage: tokens=100 cost=0.5"}]),
+    ]
+    metrics_before = [m for m in metrics]
+    traj_before = [t for t in trajectories]
+    first = summarize_run(metrics, trajectories)
+    second = summarize_run(metrics, trajectories)
+    assert first == second
+    assert metrics == metrics_before
+    assert trajectories == traj_before
+    assert isinstance(first, RunSummary)
+
+
+def test_real_seed_summary(seed_dir) -> None:
+    """The real seed: the documented run-level slice (22/19/3/1002/51106/21)."""
+    run = load_run(seed_dir)
+    metrics = build_cycle_metrics(run)
+    s = summarize_run(metrics, run.trajectories)
+    assert s.cycle_count == 22
+    assert s.completed_count == 19
+    assert s.killed_count == 3
+    assert s.total_steps == 1002
+    assert s.total_duration_seconds == 51106
+    assert s.cycles_with_duration == 21
+    assert s.total_tokens is None
+    assert s.total_cost is None
+
+
+# ---------------------------------------------------------------------------
+# render_summary
+# ---------------------------------------------------------------------------
+
+
+def test_render_summary_header_count() -> None:
+    """The header line states the exact cycle count."""
+    s = RunSummary(22, 19, 3, 1002, 51106, 21, None, None)
+    text = render_summary(s)
+    assert text.splitlines()[0] == "# Run Summary (22 cycles)"
+
+
+def test_render_summary_none_tokens_cost_placeholder() -> None:
+    """None tokens/cost render as the stable '-' placeholder."""
+    s = RunSummary(22, 19, 3, 1002, 51106, 21, None, None)
+    text = render_summary(s)
+    assert "total tokens: -" in text
+    assert "total cost: -" in text
+
+
+def test_render_summary_values() -> None:
+    """Each aggregate field renders as a key: value line."""
+    s = RunSummary(5, 4, 1, 100, 3600, 4, 1234, 0.5)
+    text = render_summary(s)
+    lines = text.splitlines()
+    assert "cycles: 5" in lines
+    assert "completed: 4" in lines
+    assert "killed: 1" in lines
+    assert "total steps: 100" in lines
+    assert "total duration (s): 3600" in lines
+    assert "cycles with duration: 4" in lines
+    assert "total tokens: 1234" in lines
+    assert "total cost: 0.5" in lines
+
+
+def test_render_summary_deterministic_and_no_mutation() -> None:
+    """render_summary is deterministic and never mutates its input."""
+    s = RunSummary(22, 19, 3, 1002, 51106, 21, None, None)
+    first = render_summary(s)
+    second = render_summary(s)
+    assert first == second
+    assert s == RunSummary(22, 19, 3, 1002, 51106, 21, None, None)

@@ -18,6 +18,7 @@ from fourseer.models import (
     CycleMetrics,
     CycleRecord,
     GateLog,
+    RunSummary,
     Trajectory,
 )
 
@@ -87,6 +88,7 @@ def test_all_models_are_frozen() -> None:
         CycleBlock(cycle_no=1),
         GateLog(),
         CommitRecord(hash="h", short_hash="s", author="a", date="d", subject="s"),
+        RunSummary(22, 19, 3, 1002, 51106, 21, None, None),
     ]
     for obj in samples:
         assert dataclasses.is_dataclass(obj)
@@ -205,6 +207,58 @@ def test_cycle_metrics_hashable_and_equal() -> None:
     """Two identical CycleMetrics compare equal and hash equal."""
     a = CycleMetrics(7, "max_steps_reached", 82, 3505, "trajectory_0013.json")
     b = CycleMetrics(7, "max_steps_reached", 82, 3505, "trajectory_0013.json")
+    assert a == b
+    assert hash(a) == hash(b)
+    assert len({a, b}) == 1
+
+
+def test_run_summary_fields() -> None:
+    """RunSummary carries all eight fields with the given values."""
+    s = RunSummary(
+        cycle_count=22,
+        completed_count=19,
+        killed_count=3,
+        total_steps=1002,
+        total_duration_seconds=51106,
+        cycles_with_duration=21,
+        total_tokens=1234,
+        total_cost=0.5,
+    )
+    assert s.cycle_count == 22
+    assert s.completed_count == 19
+    assert s.killed_count == 3
+    assert s.total_steps == 1002
+    assert s.total_duration_seconds == 51106
+    assert s.cycles_with_duration == 21
+    assert s.total_tokens == 1234
+    assert s.total_cost == 0.5
+
+
+def test_run_summary_none_tokens_cost() -> None:
+    """total_tokens / total_cost may be None (no usage data)."""
+    s = RunSummary(22, 19, 3, 1002, 51106, 21, None, None)
+    assert s.total_tokens is None
+    assert s.total_cost is None
+
+
+def test_run_summary_invariant_completed_plus_killed() -> None:
+    """The pinned invariant: completed_count + killed_count == cycle_count."""
+    s = RunSummary(22, 19, 3, 1002, 51106, 21, None, None)
+    assert s.completed_count + s.killed_count == s.cycle_count
+
+
+def test_run_summary_is_frozen() -> None:
+    """RunSummary is a frozen dataclass: mutation raises."""
+    s = RunSummary(22, 19, 3, 1002, 51106, 21, None, None)
+    assert dataclasses.is_dataclass(s)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        s.cycle_count = 99
+
+
+def test_run_summary_hashable_and_equal() -> None:
+    """Two identical RunSummary instances compare equal and hash equal."""
+    a = RunSummary(22, 19, 3, 1002, 51106, 21, None, None)
+    b = RunSummary(22, 19, 3, 1002, 51106, 21, None, None)
     assert a == b
     assert hash(a) == hash(b)
     assert len({a, b}) == 1
