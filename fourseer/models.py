@@ -16,6 +16,7 @@ Models
 - :class:`ConsistencyIssue`— one cross-source inconsistency (validator output).
 - :class:`CycleMetrics`    — per-cycle metrics (report output).
 - :class:`RunSummary`      — run-level totals aggregated from per-cycle metrics.
+- :class:`CycleClassification` — one cycle's failure-mode classification (taxonomy output).
 
 Field semantics are documented per-field. Where a source artifact may omit a
 value (e.g. a wall-clock-killed cycle that never wrote an ``OUTER`` line), the
@@ -169,6 +170,16 @@ class CycleBlock:
     lessons:
         The list of lesson strings from the ``### Lessons`` section (numbered
         items, leading markers stripped), or an empty list.
+    gate_after:
+        The ``### Results`` table's ``Gate (build+test+lint)`` row ``After``
+        cell, lowercased to ``"green"`` / ``"red"``, or ``None`` when the block
+        has no ``### Results`` table (or the row is absent).
+    merged:
+        Whether the cycle was merged on main, read from the ``### Results``
+        table's ``Merged on main`` row ``After`` cell: ``True`` when the cell
+        carries a commit hash / PR reference, ``False`` when it is an em-dash
+        or empty, and ``None`` when the block has no ``### Results`` table (or
+        the row is absent).
     """
 
     cycle_no: int
@@ -177,6 +188,8 @@ class CycleBlock:
     head_start: str | None = None
     head_end: str | None = None
     lessons: list[str] = field(default_factory=list)
+    gate_after: str | None = None
+    merged: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -357,3 +370,48 @@ class RunSummary:
     cycles_with_duration: int
     total_tokens: int | None
     total_cost: float | None
+
+
+@dataclass(frozen=True)
+class CycleClassification:
+    """One cycle's failure-mode classification (a pure value object).
+
+    Produced by :func:`fourseer.taxonomy.classify_cycle`. It tags a single
+    outer-loop cycle with a stable failure-mode ``mode`` and, when the gate log
+    carries a matching ``### Results`` table, the cycle's gate outcome and
+    merge status.
+
+    The closed set of ``mode`` values is:
+
+    - ``"wall_clock_kill"``   — the cycle was killed by the wall-clock alarm
+      before writing an ``OUTER`` outcome (``metrics.outcome is None``).
+    - ``"max_steps"``         — the inner loop ran to its step budget
+      (``metrics.outcome == "max_steps_reached"``).
+    - ``"task_complete"``     — the inner loop completed the task
+      (``metrics.outcome == "exit:task_complete"``).
+    - ``"execution_error"``   — the inner loop died on an execution error
+      (``metrics.outcome`` starts with ``"execution_error"``).
+    - ``"format_error"``      — the inner loop died on a repeated format error
+      (``metrics.outcome`` starts with ``"repeated_format_error"``).
+    - ``"other"``             — any other non-``None`` outcome.
+
+    Attributes
+    ----------
+    cycle_no:
+        The integer cycle number (from the :class:`CycleMetrics`).
+    mode:
+        The failure-mode tag, one of the six values above.
+    gate:
+        The matching :class:`CycleBlock`'s ``gate_after`` (``"green"`` /
+        ``"red"``), or ``None`` when the gate log has no matching block or the
+        block has no ``### Results`` table.
+    merged:
+        The matching :class:`CycleBlock`'s ``merged`` (``True`` / ``False``),
+        or ``None`` when the gate log has no matching block or the block has no
+        ``### Results`` table.
+    """
+
+    cycle_no: int
+    mode: str
+    gate: str | None = None
+    merged: bool | None = None

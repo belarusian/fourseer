@@ -69,3 +69,17 @@ def test_public_api_reexports_run_summary() -> None:
     assert "RunSummary" in fourseer.__all__
     assert "summarize_run" in fourseer.__all__
     assert "render_summary" in fourseer.__all__
+
+
+def test_public_api_reexports_taxonomy() -> None:
+    """CycleClassification, classify_cycle, classify_run are importable and in __all__."""
+    from fourseer import CycleClassification, classify_cycle, classify_run
+
+    assert CycleClassification is not None
+    assert classify_cycle is not None
+    assert classify_run is not None
+    import fourseer
+
+    assert "CycleClassification" in fourseer.__all__
+    assert "classify_cycle" in fourseer.__all__
+    assert "classify_run" in fourseer.__all__
