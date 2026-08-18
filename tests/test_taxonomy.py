@@ -8,6 +8,12 @@ mapping for every closed tag, ``gate`` / ``merged`` enrichment from a matching
 block, no-mutation / determinism). Most tests use small hand-built inline
 fixtures (not the full seed). Exactly one test exercises the real seed dataset
 via the ``seed_dir`` fixture.
+
+Covers :func:`fourseer.taxonomy.summarize_taxonomy` (the run-level
+failure-mode distribution: mode / gate / merged counts, the unknown counters,
+sparse keys, the partition invariants, no-mutation / determinism, and the empty
+input) and :func:`fourseer.taxonomy.render_taxonomy` (the deterministic
+rendered block: full / empty / no-unknown / determinism).
 """
 
 from __future__ import annotations
@@ -22,8 +28,9 @@ from fourseer.models import (
     CycleRecord,
     GateLog,
     Run,
+    TaxonomySummary,
 )
-from fourseer.taxonomy import classify_cycle, classify_run
+from fourseer.taxonomy import classify_cycle, classify_run, render_taxonomy, summarize_taxonomy
 
 
 def _metrics(cycle_no: int, outcome: str | None) -> CycleMetrics:
@@ -299,3 +306,219 @@ def test_real_seed_taxonomy(seed_dir) -> None:
     # A completed cycle with a Results table is green / merged.
     assert by_cycle[8].gate == "green"
     assert by_cycle[8].merged is True
+
+
+# ---------------------------------------------------------------------------
+# summarize_taxonomy
+# ---------------------------------------------------------------------------
+
+
+def _cls(cycle_no: int, mode: str, gate: str | None, merged: bool | None) -> CycleClassification:
+    """A minimal :class:`CycleClassification` for a given cycle / tags."""
+    return CycleClassification(cycle_no=cycle_no, mode=mode, gate=gate, merged=merged)
+
+
+def test_summarize_taxonomy_empty() -> None:
+    """An empty classification list yields an empty, zeroed summary."""
+    s = summarize_taxonomy([])
+    assert isinstance(s, TaxonomySummary)
+    assert s.cycle_count == 0
+    assert s.mode_counts == {}
+    assert s.gate_counts == {}
+    assert s.gate_unknown == 0
+    assert s.merged_counts == {}
+    assert s.merged_unknown == 0
+
+
+def test_summarize_taxonomy_mode_counts() -> None:
+    """mode_counts tallies every cycle's mode (a total mapping)."""
+    cls = [
+        _cls(1, "task_complete", "green", True),
+        _cls(2, "task_complete", "green", True),
+        _cls(3, "max_steps", "red", False),
+        _cls(4, "wall_clock_kill", None, None),
+    ]
+    s = summarize_taxonomy(cls)
+    assert s.cycle_count == 4
+    assert s.mode_counts == {"task_complete": 2, "max_steps": 1, "wall_clock_kill": 1}
+
+
+def test_summarize_taxonomy_gate_counts_and_unknown() -> None:
+    """gate_counts tallies non-None gates; gate_unknown counts the rest."""
+    cls = [
+        _cls(1, "task_complete", "green", True),
+        _cls(2, "max_steps", "green", True),
+        _cls(3, "task_complete", "red", False),
+        _cls(4, "wall_clock_kill", None, None),
+    ]
+    s = summarize_taxonomy(cls)
+    assert s.gate_counts == {"green": 2, "red": 1}
+    assert s.gate_unknown == 1
+
+
+def test_summarize_taxonomy_merged_counts_and_unknown() -> None:
+    """merged_counts tallies non-None merge flags ("merged"/"not_merged"); merged_unknown counts the rest."""
+    cls = [
+        _cls(1, "task_complete", "green", True),
+        _cls(2, "max_steps", "green", True),
+        _cls(3, "task_complete", "red", False),
+        _cls(4, "wall_clock_kill", None, None),
+    ]
+    s = summarize_taxonomy(cls)
+    assert s.merged_counts == {"merged": 2, "not_merged": 1}
+    assert s.merged_unknown == 1
+
+
+def test_summarize_taxonomy_sparse_keys() -> None:
+    """Only tags / flags that actually occur appear as keys."""
+    cls = [_cls(1, "task_complete", "green", True)]
+    s = summarize_taxonomy(cls)
+    assert set(s.mode_counts) == {"task_complete"}
+    assert set(s.gate_counts) == {"green"}
+    assert set(s.merged_counts) == {"merged"}
+    assert s.gate_unknown == 0
+    assert s.merged_unknown == 0
+
+
+def test_summarize_taxonomy_invariants() -> None:
+    """The three partition invariants hold on a mixed fixture."""
+    cls = [
+        _cls(1, "task_complete", "green", True),
+        _cls(2, "max_steps", "green", True),
+        _cls(3, "task_complete", "red", False),
+        _cls(4, "wall_clock_kill", None, None),
+        _cls(5, "execution_error", None, None),
+    ]
+    s = summarize_taxonomy(cls)
+    assert sum(s.mode_counts.values()) == s.cycle_count
+    assert sum(s.gate_counts.values()) + s.gate_unknown == s.cycle_count
+    assert sum(s.merged_counts.values()) + s.merged_unknown == s.cycle_count
+
+
+def test_summarize_taxonomy_no_mutation() -> None:
+    """summarize_taxonomy does not mutate its input list."""
+    cls = [
+        _cls(1, "task_complete", "green", True),
+        _cls(2, "max_steps", None, None),
+    ]
+    before = list(cls)
+    summarize_taxonomy(cls)
+    assert cls == before
+
+
+def test_summarize_taxonomy_deterministic() -> None:
+    """The same input always yields the same summary."""
+    cls = [
+        _cls(1, "task_complete", "green", True),
+        _cls(2, "max_steps", "red", False),
+        _cls(3, "wall_clock_kill", None, None),
+    ]
+    assert summarize_taxonomy(cls) == summarize_taxonomy(cls)
+
+
+# ---------------------------------------------------------------------------
+# render_taxonomy
+# ---------------------------------------------------------------------------
+
+
+def test_render_taxonomy_full() -> None:
+    """A summary with all three distributions and unknowns renders fully."""
+    s = TaxonomySummary(
+        cycle_count=4,
+        mode_counts={"task_complete": 2, "max_steps": 1, "wall_clock_kill": 1},
+        gate_counts={"green": 2, "red": 1},
+        gate_unknown=1,
+        merged_counts={"merged": 2, "not_merged": 1},
+        merged_unknown=1,
+    )
+    out = render_taxonomy(s)
+    assert out.endswith("\n")
+    lines = out.splitlines()
+    assert lines[0] == "# Failure-Mode Taxonomy (4 cycles)"
+    assert "cycles: 4" in lines
+    # Modes are sorted by tag.
+    assert "modes: max_steps=1, task_complete=2, wall_clock_kill=1" in lines
+    # Gates sorted, with the unknown suffix.
+    assert "gates: green=2, red=1, unknown=1" in lines
+    # Merged sorted by flag, with the unknown suffix.
+    assert "merged: merged=2, not_merged=1, unknown=1" in lines
+
+
+def test_render_taxonomy_empty() -> None:
+    """An empty summary renders the placeholder for every distribution."""
+    s = TaxonomySummary(cycle_count=0)
+    out = render_taxonomy(s)
+    lines = out.splitlines()
+    assert lines[0] == "# Failure-Mode Taxonomy (0 cycles)"
+    assert "cycles: 0" in lines
+    assert "modes: -" in lines
+    assert "gates: -" in lines
+    assert "merged: -" in lines
+
+
+def test_render_taxonomy_no_unknown_suffix() -> None:
+    """When gate_unknown / merged_unknown are zero, no unknown suffix appears."""
+    s = TaxonomySummary(
+        cycle_count=2,
+        mode_counts={"task_complete": 2},
+        gate_counts={"green": 2},
+        gate_unknown=0,
+        merged_counts={"merged": 2},
+        merged_unknown=0,
+    )
+    out = render_taxonomy(s)
+    assert "gates: green=2" in out
+    assert "merged: merged=2" in out
+    assert "unknown" not in out
+
+
+def test_render_taxonomy_deterministic() -> None:
+    """The same summary always renders the same block."""
+    s = TaxonomySummary(
+        cycle_count=3,
+        mode_counts={"task_complete": 1, "max_steps": 2},
+        gate_counts={"green": 3},
+        gate_unknown=0,
+        merged_counts={"merged": 3},
+        merged_unknown=0,
+    )
+    assert render_taxonomy(s) == render_taxonomy(s)
+
+
+# ---------------------------------------------------------------------------
+# Real seed dataset (exactly one test)
+# ---------------------------------------------------------------------------
+
+
+def test_real_seed_taxonomy_summary(seed_dir) -> None:
+    """summarize_taxonomy on the real seed: a small, stable, documented slice.
+
+    The seed's ``cycles.out`` carries 22 cycles (7-28): 12 ``task_complete``,
+    7 ``max_steps``, and 3 wall-clock kills (21/22/25). Every gate-log ``###
+    Results`` table in the seed is ``green`` / merged, so the 20 cycles that
+    have a matching block are ``green`` / merged-``True``; cycles 21 and 22
+    have no matching block, so their ``gate`` / ``merged`` are ``None`` (the
+    two unknowns). Cycle 25 is a kill but DOES have a Results table, so it is
+    counted as ``green`` / merged-``True``.
+    """
+    run = load_run(seed_dir)
+    s = summarize_taxonomy(classify_run(run))
+
+    assert s.cycle_count == 22
+    assert s.mode_counts == {"task_complete": 12, "max_steps": 7, "wall_clock_kill": 3}
+    assert s.gate_counts == {"green": 20}
+    assert s.gate_unknown == 2
+    assert s.merged_counts == {"merged": 20}
+    assert s.merged_unknown == 2
+
+    # The partition invariants hold on the real data.
+    assert sum(s.mode_counts.values()) == s.cycle_count
+    assert sum(s.gate_counts.values()) + s.gate_unknown == s.cycle_count
+    assert sum(s.merged_counts.values()) + s.merged_unknown == s.cycle_count
+
+    # The rendered block carries the documented header and distributions.
+    out = render_taxonomy(s)
+    assert out.splitlines()[0] == "# Failure-Mode Taxonomy (22 cycles)"
+    assert "modes: max_steps=7, task_complete=12, wall_clock_kill=3" in out
+    assert "gates: green=20, unknown=2" in out
+    assert "merged: merged=20, unknown=2" in out
