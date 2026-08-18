@@ -6,12 +6,42 @@ git history) and reports per-cycle metrics, a failure-mode taxonomy, and
 drift (issue drift + plan drift).
 
 Public surface is re-exported here; submodules:
-  - fourseer.parse      : artifact parsers
-  - fourseer.report     : per-cycle metrics
-  - fourseer.taxonomy   : failure-mode classification
-  - fourseer.drift      : issue + plan drift detection
-  - fourseer.cli        : the `fourseer` entrypoint
+  - fourseer.models   : typed dataclasses for the parsed artifacts
+  - fourseer.parse    : artifact parsers (trajectories, cycles.out, gate log, git)
+  - fourseer.report   : per-cycle metrics
+  - fourseer.taxonomy : failure-mode classification
+  - fourseer.drift    : issue + plan drift detection
+  - fourseer.cli      : the `fourseer` entrypoint
 """
 
+from fourseer.models import (
+    BuildOrderRow,
+    CommitRecord,
+    CycleBlock,
+    CycleRecord,
+    GateLog,
+    Trajectory,
+)
+from fourseer.parse import (
+    load_trajectories,
+    parse_cycles_out,
+    parse_gate_log,
+    read_git_history,
+)
+
 __version__ = "0.1.0"
-__all__ = ["__version__"]
+__all__ = [
+    "__version__",
+    # models
+    "Trajectory",
+    "CycleRecord",
+    "BuildOrderRow",
+    "CycleBlock",
+    "GateLog",
+    "CommitRecord",
+    # parsers
+    "load_trajectories",
+    "parse_cycles_out",
+    "parse_gate_log",
+    "read_git_history",
+]
