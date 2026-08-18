@@ -415,3 +415,53 @@ class CycleClassification:
     mode: str
     gate: str | None = None
     merged: bool | None = None
+
+
+@dataclass(frozen=True)
+class TaxonomySummary:
+    """Run-level failure-mode distribution aggregated from a run's classifications.
+
+    A pure, hashable, comparable value object that rolls a whole run's
+    per-cycle :class:`CycleClassification` list up into a single aggregate a
+    consumer (CLI, report, drift) can hold. Produced by
+    :func:`fourseer.taxonomy.summarize_taxonomy`.
+
+    The three distributions (``mode_counts`` / ``gate_counts`` /
+    ``merged_counts``) partition the run's cycles by their respective tags.
+    Because ``gate`` and ``merged`` are best-effort enrichment that is ``None``
+    for cycles with no matching gate-log ``### Results`` table, the
+    ``gate_unknown`` / ``merged_unknown`` counters track how many cycles
+    carried no such value. Invariants:
+
+    - ``sum(mode_counts.values()) == cycle_count`` (every cycle has a mode).
+    - ``sum(gate_counts.values()) + gate_unknown == cycle_count``.
+    - ``sum(merged_counts.values()) + merged_unknown == cycle_count``.
+
+    Attributes
+    ----------
+    cycle_count:
+        The total number of classifications (``len(classifications)``).
+    mode_counts:
+        A mapping of each failure-mode tag to the number of cycles with that
+        mode. Only tags that actually occur appear as keys.
+    gate_counts:
+        A mapping of each non-``None`` gate tag (``"green"`` / ``"red"``) to the
+        number of cycles with that gate. Only tags that actually occur appear.
+    gate_unknown:
+        The number of cycles whose ``gate`` is ``None`` (no matching Results
+        table).
+    merged_counts:
+        A mapping of each non-``None`` merge flag to the number of cycles with
+        that flag, keyed ``"merged"`` (``merged is True``) and ``"not_merged"``
+        (``merged is False``). Only flags that actually occur appear.
+    merged_unknown:
+        The number of cycles whose ``merged`` is ``None`` (no matching Results
+        table).
+    """
+
+    cycle_count: int
+    mode_counts: dict[str, int] = field(default_factory=dict)
+    gate_counts: dict[str, int] = field(default_factory=dict)
+    gate_unknown: int = 0
+    merged_counts: dict[str, int] = field(default_factory=dict)
+    merged_unknown: int = 0
