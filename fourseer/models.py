@@ -13,6 +13,7 @@ Models
 - :class:`CycleBlock`      — one "## Cycle N" block from the gate log.
 - :class:`GateLog`         — the whole gate log: build order + cycle blocks.
 - :class:`CommitRecord`    — one commit from ``git log``.
+- :class:`ConsistencyIssue`— one cross-source inconsistency (validator output).
 
 Field semantics are documented per-field. Where a source artifact may omit a
 value (e.g. a wall-clock-killed cycle that never wrote an ``OUTER`` line), the
@@ -44,11 +45,52 @@ class Trajectory:
     step_count:
         Number of steps. Derived from ``len(messages)`` when the file has no
         explicit ``step_count`` key.
+    name:
+        The source filename (basename, e.g. ``"trajectory_0013.json"``) the
+        trajectory was loaded from, or ``""`` when constructed directly.
+        Populated by :func:`fourseer.parse.trajectories.load_trajectories` so
+        consumers can correlate a cycle's referenced trajectory path with the
+        set of loaded trajectories.
     """
 
     outcome: str | None
     messages: list[dict[str, Any]] = field(default_factory=list)
     step_count: int = 0
+    name: str = ""
+
+
+@dataclass(frozen=True)
+class ConsistencyIssue:
+    """One cross-source inconsistency found by :func:`fourseer.validate.validate_run`.
+
+    A pure, hashable, comparable value object describing a single mismatch
+    between the four independently-parsed sources in a :class:`Run`. The
+    validator returns a deterministic, sorted list of these.
+
+    Attributes
+    ----------
+    code:
+        A stable machine tag (snake_case) identifying the check that fired.
+        Canonical values:
+
+        - ``"orphan_trajectory_path"`` — a ``CycleRecord.trajectory_path``
+          basename that is not among the loaded ``Trajectory.name`` values.
+        - ``"cycle_not_in_gate_log"`` — a ``CycleRecord.cycle_no`` with no
+          matching ``CycleBlock.cycle_no`` in the gate log.
+        - ``"gate_cycle_not_in_cycles_out"`` — a ``CycleBlock.cycle_no`` with
+          no matching ``CycleRecord.cycle_no`` in ``cycles.out``.
+        - ``"build_order_range_gap"`` — an executed ``CycleRecord.cycle_no``
+          outside every Build Order range.
+    cycle_no:
+        The cycle the issue concerns, or ``None`` when the issue is not tied to
+        a single cycle.
+    detail:
+        A free-text, deterministic human-readable explanation.
+    """
+
+    code: str
+    cycle_no: int | None
+    detail: str
 
 
 @dataclass(frozen=True)

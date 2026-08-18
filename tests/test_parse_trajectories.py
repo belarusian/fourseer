@@ -84,3 +84,20 @@ def test_seed_trajectories(seed_dir: Path) -> None:
     assert first.outcome == "max_steps_reached"
     assert first.step_count == 122
     assert len(first.messages) == 122
+
+
+def test_name_populated_from_basename_dir(tmp_path: Path) -> None:
+    """Directory scan: each Trajectory.name is the source file basename."""
+    _write(tmp_path / "trajectory_0000.json", {"outcome": "a", "messages": []})
+    _write(tmp_path / "trajectory_0001.json", {"outcome": "b", "messages": []})
+    trajs = load_trajectories(tmp_path)
+    assert [t.name for t in trajs] == ["trajectory_0000.json", "trajectory_0001.json"]
+
+
+def test_name_populated_single_file(tmp_path: Path) -> None:
+    """Single-file path: the one Trajectory.name is the file basename."""
+    f = tmp_path / "trajectory_0042.json"
+    _write(f, {"outcome": "x", "messages": []})
+    trajs = load_trajectories(f)
+    assert len(trajs) == 1
+    assert trajs[0].name == "trajectory_0042.json"
