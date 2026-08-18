@@ -23,6 +23,7 @@ from fourseer.models import (
     CommitRecord,
     ConsistencyIssue,
     CycleBlock,
+    CycleClassification,
     CycleMetrics,
     CycleRecord,
     GateLog,
@@ -43,6 +44,7 @@ from fourseer.report import (
     render_summary,
     summarize_run,
 )
+from fourseer.taxonomy import classify_cycle, classify_run
 from fourseer.validate import validate_run
 
 __version__ = "0.1.0"
@@ -54,6 +56,7 @@ __all__ = [
     "CycleMetrics",
     "BuildOrderRow",
     "CycleBlock",
+    "CycleClassification",
     "GateLog",
     "CommitRecord",
     "Run",
@@ -69,6 +72,9 @@ __all__ = [
     "render_summary",
     # validation
     "validate_run",
+    # taxonomy
+    "classify_cycle",
+    "classify_run",
     # parsers
     "load_trajectories",
     "parse_cycles_out",
