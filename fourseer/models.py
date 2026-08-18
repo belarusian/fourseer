@@ -174,3 +174,57 @@ class CommitRecord:
     author: str
     date: str
     subject: str
+
+
+@dataclass(frozen=True)
+class Run:
+    """A complete run of the outer loop: the four parsed artifacts together.
+
+    This is the top-level aggregate that composes the outputs of the four
+    parsers in :mod:`fourseer.parse` into a single value object a consumer
+    (report / taxonomy / drift) can hold:
+
+    - :func:`~fourseer.parse.trajectories.load_trajectories` -> ``trajectories``
+    - :func:`~fourseer.parse.cycles_out.parse_cycles_out`     -> ``cycles``
+    - :func:`~fourseer.parse.gate_log.parse_gate_log`         -> ``gate_log``
+    - :func:`~fourseer.parse.git_history.read_git_history`    -> ``commits``
+
+    All fields default to empty so a ``Run`` can be built incrementally or
+    from a partial artifact set (see :func:`fourseer.load.load_run`, which
+    tolerates missing optional files).
+
+    Attributes
+    ----------
+    trajectories:
+        The inner-loop trajectories (one per ``trajectories/*.json``).
+    cycles:
+        The outer-loop cycle records from ``cycles.out``.
+    gate_log:
+        The parsed gate log (Build Order table + cycle blocks).
+    commits:
+        The git commit history (empty when no repo was supplied).
+    """
+
+    trajectories: list[Trajectory] = field(default_factory=list)
+    cycles: list[CycleRecord] = field(default_factory=list)
+    gate_log: GateLog = field(default_factory=GateLog)
+    commits: list[CommitRecord] = field(default_factory=list)
+
+    @property
+    def trajectory_count(self) -> int:
+        """Number of trajectories in this run."""
+        return len(self.trajectories)
+
+    @property
+    def cycle_count(self) -> int:
+        """Number of cycle records in this run."""
+        return len(self.cycles)
+
+    def killed_cycles(self) -> list[int]:
+        """Cycle numbers that were killed before writing an ``OUTER`` outcome.
+
+        A wall-clock-killed cycle has ``outcome is None`` (see
+        :class:`CycleRecord`). Returns the matching ``cycle_no`` values in
+        file order.
+        """
+        return [c.cycle_no for c in self.cycles if c.outcome is None]
