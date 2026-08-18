@@ -8,6 +8,12 @@ start timestamp and the next cycle's start timestamp (with a midnight wrap).
 
 It performs no I/O, never mutates its input, and returns a list sorted by
 ``cycle_no``.
+
+:func:`summarize_run` rolls those per-cycle metrics up into a single
+:class:`~fourseer.models.RunSummary` (run-level totals), and
+:func:`render_summary` renders that aggregate as a short, deterministic
+human-readable block. Both are pure, deterministic, stdlib-only, and
+perform no I/O.
 """
 
 from __future__ import annotations
@@ -15,9 +21,15 @@ from __future__ import annotations
 import re
 from pathlib import PurePosixPath
 
-from fourseer.models import CycleMetrics, Run, Trajectory
+from fourseer.models import CycleMetrics, Run, RunSummary, Trajectory
 
-__all__ = ["build_cycle_metrics", "extract_tokens_cost", "render_report"]
+__all__ = [
+    "build_cycle_metrics",
+    "extract_tokens_cost",
+    "render_report",
+    "render_summary",
+    "summarize_run",
+]
 
 _SECONDS_PER_DAY = 86400
 
@@ -207,3 +219,140 @@ def extract_tokens_cost(
                 cost = float(cost_raw)
                 total_cost = cost if total_cost is None else total_cost + cost
     return total_tokens, total_cost
+
+def summarize_run(
+    metrics: list[CycleMetrics],
+    trajectories: list[Trajectory] | None = None,
+) -> RunSummary:
+    """Roll per-cycle :class:`~fourseer.models.CycleMetrics` up into a
+    :class:`~fourseer.models.RunSummary`.
+
+    A pure, deterministic, stdlib-only aggregation. It performs no I/O and
+    never mutates *metrics* or *trajectories*.
+
+    Counts and sums
+    ---------------
+    - ``cycle_count`` is ``len(metrics)``;
+    - ``completed_count`` is the number of metrics whose ``outcome`` is
+      non-``None``;
+    - ``killed_count`` is the number of metrics whose ``outcome`` is ``None``
+      (so ``completed_count + killed_count == cycle_count``);
+    - ``total_steps`` is the sum of every metric's ``step_count``;
+    - ``total_duration_seconds`` is the sum of the non-``None``
+      ``duration_seconds`` values (``0`` when none);
+    - ``cycles_with_duration`` is the count of non-``None`` durations.
+
+    Tokens / cost (the load-bearing join)
+    -------------------------------------
+    ``total_tokens`` / ``total_cost`` are computed by joining on the metrics'
+    ``trajectory_name`` field — the set of trajectories the run's cycles
+    actually reference — NOT by scanning every entry of *trajectories*:
+
+    - a ``name -> Trajectory`` map is built from the supplied *trajectories*;
+    - the DISTINCT referenced ``trajectory_name`` values are collected (a name
+      referenced by two cycles is counted ONCE);
+    - :func:`extract_tokens_cost` is called on each distinct referenced
+      trajectory and the results are summed.
+
+    ``total_tokens`` / ``total_cost`` are ``None`` unless at least one joined
+    trajectory carries a usage record. When *trajectories* is ``None`` (or no
+    referenced trajectory is present in it) both are ``None``. A trajectory
+    present in *trajectories* but referenced by no cycle contributes nothing.
+
+    Parameters
+    ----------
+    metrics:
+        The per-cycle metrics to aggregate (typically the output of
+        :func:`build_cycle_metrics`). Never mutated.
+    trajectories:
+        The loaded trajectories to join against, or ``None``. When ``None``
+        (or when no referenced trajectory is present) ``total_tokens`` /
+        ``total_cost`` are ``None``. Never mutated.
+
+    Returns
+    -------
+    RunSummary
+        The run-level aggregate.
+    """
+    cycle_count = len(metrics)
+    completed_count = sum(1 for m in metrics if m.outcome is not None)
+    killed_count = cycle_count - completed_count
+    total_steps = sum(m.step_count for m in metrics)
+    total_duration_seconds = sum(
+        m.duration_seconds for m in metrics if m.duration_seconds is not None
+    )
+    cycles_with_duration = sum(1 for m in metrics if m.duration_seconds is not None)
+
+    total_tokens: int | None = None
+    total_cost: float | None = None
+    if trajectories is not None:
+        by_name: dict[str, Trajectory] = {t.name: t for t in trajectories}
+        # Distinct referenced names, in first-seen order (deterministic).
+        referenced: list[str] = []
+        seen: set[str] = set()
+        for m in metrics:
+            name = m.trajectory_name
+            if name is not None and name not in seen:
+                seen.add(name)
+                referenced.append(name)
+        for name in referenced:
+            traj = by_name.get(name)
+            if traj is None:
+                continue
+            tokens, cost = extract_tokens_cost(traj)
+            if tokens is not None:
+                total_tokens = tokens if total_tokens is None else total_tokens + tokens
+            if cost is not None:
+                total_cost = cost if total_cost is None else total_cost + cost
+
+    return RunSummary(
+        cycle_count=cycle_count,
+        completed_count=completed_count,
+        killed_count=killed_count,
+        total_steps=total_steps,
+        total_duration_seconds=total_duration_seconds,
+        cycles_with_duration=cycles_with_duration,
+        total_tokens=total_tokens,
+        total_cost=total_cost,
+    )
+
+
+def render_summary(summary: RunSummary) -> str:
+    """Render a :class:`~fourseer.models.RunSummary` as a short block.
+
+    A pure, deterministic, stdlib-only string transformation, consistent in
+    style with :func:`render_report`:
+
+    - a header line ``# Run Summary (N cycles)`` where ``N`` is
+      ``summary.cycle_count``;
+    - one ``key: value`` line per aggregate field, in a fixed order;
+    - a ``None`` ``total_tokens`` / ``total_cost`` renders as the single
+      stable placeholder ``-`` (see :data:`_PLACEHOLDER`).
+
+    Parameters
+    ----------
+    summary:
+        The run-level aggregate to render. Never mutated.
+
+    Returns
+    -------
+    str
+        The rendered summary block, ending with a trailing newline.
+    """
+    tokens = (
+        str(summary.total_tokens) if summary.total_tokens is not None else _PLACEHOLDER
+    )
+    cost = str(summary.total_cost) if summary.total_cost is not None else _PLACEHOLDER
+    lines: list[str] = [
+        f"# Run Summary ({summary.cycle_count} cycles)",
+        "",
+        f"cycles: {summary.cycle_count}",
+        f"completed: {summary.completed_count}",
+        f"killed: {summary.killed_count}",
+        f"total steps: {summary.total_steps}",
+        f"total duration (s): {summary.total_duration_seconds}",
+        f"cycles with duration: {summary.cycles_with_duration}",
+        f"total tokens: {tokens}",
+        f"total cost: {cost}",
+    ]
+    return "\n".join(lines) + "\n"

@@ -11,6 +11,7 @@ Public surface is re-exported here; submodules:
   - fourseer.load     : top-level loader (composes the four parsers into a Run)
   - fourseer.validate : cross-source consistency validation (validate_run)
   - fourseer.report   : per-cycle metrics + report renderer + tokens/cost
+                        + run-level summary (summarize_run / render_summary)
   - fourseer.taxonomy : failure-mode classification
   - fourseer.drift    : issue + plan drift detection
   - fourseer.cli      : the `fourseer` entrypoint
@@ -26,6 +27,7 @@ from fourseer.models import (
     CycleRecord,
     GateLog,
     Run,
+    RunSummary,
     Trajectory,
 )
 from fourseer.parse import (
@@ -34,7 +36,13 @@ from fourseer.parse import (
     parse_gate_log,
     read_git_history,
 )
-from fourseer.report import build_cycle_metrics, extract_tokens_cost, render_report
+from fourseer.report import (
+    build_cycle_metrics,
+    extract_tokens_cost,
+    render_report,
+    render_summary,
+    summarize_run,
+)
 from fourseer.validate import validate_run
 
 __version__ = "0.1.0"
@@ -50,12 +58,15 @@ __all__ = [
     "CommitRecord",
     "Run",
     "ConsistencyIssue",
+    "RunSummary",
     # loaders
     "load_run",
     # report
     "build_cycle_metrics",
     "render_report",
     "extract_tokens_cost",
+    "summarize_run",
+    "render_summary",
     # validation
     "validate_run",
     # parsers
