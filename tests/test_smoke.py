@@ -44,3 +44,15 @@ def test_public_api_reexports_report() -> None:
 
     assert "CycleMetrics" in fourseer.__all__
     assert "build_cycle_metrics" in fourseer.__all__
+
+
+def test_public_api_reexports_report_render() -> None:
+    """render_report and extract_tokens_cost are importable and in __all__."""
+    from fourseer import extract_tokens_cost, render_report
+
+    assert render_report is not None
+    assert extract_tokens_cost is not None
+    import fourseer
+
+    assert "render_report" in fourseer.__all__
+    assert "extract_tokens_cost" in fourseer.__all__

@@ -1,19 +1,25 @@
-"""Tests for :func:`fourseer.report.build_cycle_metrics`.
+"""Tests for :mod:`fourseer.report`.
 
-Most tests use small hand-built :class:`~fourseer.models.Run` fixtures (not the
-full seed) to isolate each behavior: basename join, kill no-join, start-to-next
-duration, midnight wrap, last-cycle ``None`` duration, ``cycle_no`` ordering,
-and no-mutation / determinism. Exactly one test exercises the real seed dataset
-via the ``seed_dir`` fixture.
+Covers :func:`fourseer.report.build_cycle_metrics` (basename join, kill
+no-join, start-to-next duration, midnight wrap, last-cycle ``None`` duration,
+``cycle_no`` ordering, no-mutation / determinism),
+:func:`fourseer.report.render_report` (header, placeholder rendering, row
+order, determinism, no mutation), and
+:func:`fourseer.report.extract_tokens_cost` (conservative extraction, no
+false-positives on incidental prose). Most tests use small hand-built inline
+fixtures (not the full seed). Exactly one test per function exercises the real
+seed dataset via the ``seed_dir`` fixture.
 """
 
 from __future__ import annotations
 
 import copy
 
+import pytest
+
 from fourseer.load import load_run
 from fourseer.models import CycleMetrics, CycleRecord, Run, Trajectory
-from fourseer.report import build_cycle_metrics
+from fourseer.report import build_cycle_metrics, extract_tokens_cost, render_report
 
 
 def _metrics_by_cycle(run: Run) -> dict[int, CycleMetrics]:
@@ -141,3 +147,172 @@ def test_real_seed_metrics(seed_dir) -> None:
     assert c28.duration_seconds is None
     assert c28.step_count == 39
     assert c28.trajectory_name == "trajectory_0043.json"
+
+
+# ---------------------------------------------------------------------------
+# render_report
+# ---------------------------------------------------------------------------
+
+
+def _cm(cycle_no, outcome, step_count, duration_seconds, trajectory_name):
+    """Build a CycleMetrics value (positional shortcut for tests)."""
+    return CycleMetrics(
+        cycle_no=cycle_no,
+        outcome=outcome,
+        step_count=step_count,
+        duration_seconds=duration_seconds,
+        trajectory_name=trajectory_name,
+    )
+
+
+def test_render_report_header_and_empty() -> None:
+    """An empty list renders the (0 cycles) header + table header, no rows."""
+    text = render_report([])
+    lines = text.splitlines()
+    assert lines[0] == "# Per-Cycle Metrics (0 cycles)"
+    assert "| Cycle | Outcome | Steps | Duration (s) | Trajectory |" in lines
+    assert "| --- | --- | --- | --- | --- |" in lines
+    # No data rows.
+    assert not any(l.startswith("| ") and l != "| --- | --- | --- | --- | --- |"
+                   and "Cycle" not in l for l in lines[3:])
+
+
+def test_render_report_kill_row_placeholders() -> None:
+    """A kill (outcome None, trajectory_name None) renders '-' in those columns."""
+    text = render_report([_cm(21, None, 0, 3600, None)])
+    assert "| 21 | - | 0 | 3600 | - |" in text
+
+
+def test_render_report_last_cycle_duration_placeholder() -> None:
+    """The last cycle (duration_seconds None) renders '-' in the duration column."""
+    text = render_report([_cm(28, "exit:task_complete", 39, None, "trajectory_0043.json")])
+    assert "| 28 | exit:task_complete | 39 | - | trajectory_0043.json |" in text
+
+
+def test_render_report_preserves_given_order() -> None:
+    """Rows appear in the GIVEN order; the renderer does NOT re-sort."""
+    metrics = [
+        _cm(10, "x", 1, 10, "t10.json"),
+        _cm(7, "x", 2, 20, "t7.json"),
+        _cm(8, "x", 3, 30, "t8.json"),
+    ]
+    text = render_report(metrics)
+    lines = text.splitlines()
+    # The three data rows, in input order 10, 7, 8.
+    data_rows = [l for l in lines if l.startswith("| ") and "Cycle" not in l
+                 and "---" not in l]
+    assert data_rows == [
+        "| 10 | x | 1 | 10 | t10.json |",
+        "| 7 | x | 2 | 20 | t7.json |",
+        "| 8 | x | 3 | 30 | t8.json |",
+    ]
+
+
+def test_render_report_deterministic_and_no_mutation() -> None:
+    """render_report is deterministic and never mutates its input."""
+    metrics = [
+        _cm(7, "max_steps_reached", 82, 3505, "trajectory_0013.json"),
+        _cm(21, None, 0, 3600, None),
+    ]
+    before = [m for m in metrics]  # shallow snapshot of the same objects
+    first = render_report(metrics)
+    second = render_report(metrics)
+    assert first == second
+    # The list order and the (frozen) values are unchanged.
+    assert [m.cycle_no for m in metrics] == [m.cycle_no for m in before]
+    assert metrics == before
+
+
+def test_render_report_header_count() -> None:
+    """The header line states the exact cycle count."""
+    metrics = [_cm(i, "x", i, i, f"t{i}.json") for i in range(1, 6)]
+    text = render_report(metrics)
+    assert text.splitlines()[0] == "# Per-Cycle Metrics (5 cycles)"
+
+
+# ---------------------------------------------------------------------------
+# extract_tokens_cost
+# ---------------------------------------------------------------------------
+
+
+def test_extract_tokens_cost_with_cost() -> None:
+    """A 'usage: tokens=N cost=C' line yields (N, C)."""
+    traj = Trajectory(outcome="x", messages=[
+        {"role": "user", "content": "usage: tokens=123 cost=0.45"},
+    ])
+    assert extract_tokens_cost(traj) == (123, 0.45)
+
+
+def test_extract_tokens_cost_tokens_only() -> None:
+    """A 'usage: tokens=N' line (no cost) yields (N, None)."""
+    traj = Trajectory(outcome="x", messages=[
+        {"role": "user", "content": "usage: tokens=500"},
+    ])
+    assert extract_tokens_cost(traj) == (500, None)
+
+
+def test_extract_tokens_cost_no_false_positive_on_prose() -> None:
+    """Incidental prose never matches: shell usage(), TS type decls, usage in comments."""
+    prose = "\n".join([
+        "usage() {",
+        "    echo \"Usage: $0 [OPTIONS]\"",
+        "}",
+        "FIVE_MAX_TOKENS=65536",
+        "export interface TokenUsage {",
+        "  prompt_tokens: number;",
+        "  completion_tokens: number;",
+        "}",
+        "// Carries the step usage when the adapter reported token accounting.",
+    ])
+    traj = Trajectory(outcome="x", messages=[{"role": "user", "content": prose}])
+    assert extract_tokens_cost(traj) == (None, None)
+
+
+def test_extract_tokens_cost_sums_multiple_records() -> None:
+    """Multiple usage records across messages are summed (tokens and cost)."""
+    traj = Trajectory(outcome="x", messages=[
+        {"role": "user", "content": "usage: tokens=100 cost=0.10"},
+        {"role": "user", "content": "noise\nusage: tokens=200 cost=0.20\nmore"},
+        {"role": "user", "content": "usage: tokens=50"},
+    ])
+    tokens, cost = extract_tokens_cost(traj)
+    assert tokens == 350
+    assert cost == pytest.approx(0.30)
+
+
+def test_extract_tokens_cost_empty_trajectory() -> None:
+    """A trajectory with no messages yields (None, None)."""
+    assert extract_tokens_cost(Trajectory(outcome="x")) == (None, None)
+
+
+def test_extract_tokens_cost_no_mutation() -> None:
+    """extract_tokens_cost never mutates the trajectory's messages."""
+    messages = [{"role": "user", "content": "usage: tokens=10 cost=0.01"}]
+    traj = Trajectory(outcome="x", messages=messages)
+    before = [dict(m) for m in messages]
+    extract_tokens_cost(traj)
+    assert traj.messages == before
+
+
+def test_real_seed_report(seed_dir) -> None:
+    """The real seed: render build_cycle_metrics(load_run(seed_dir)) and pin a slice."""
+    run = load_run(seed_dir)
+    text = render_report(build_cycle_metrics(run))
+    lines = text.splitlines()
+
+    # Header line.
+    assert lines[0] == "# Per-Cycle Metrics (22 cycles)"
+
+    # A normal row (cycle 7).
+    assert "| 7 | max_steps_reached | 82 | 3505 | trajectory_0013.json |" in lines
+
+    # A wall-clock-kill row (cycle 21): outcome and trajectory render as '-'.
+    assert "| 21 | - | 0 | 3600 | - |" in lines
+
+    # The last cycle (28): duration renders as '-'.
+    assert "| 28 | exit:task_complete | 39 | - | trajectory_0043.json |" in lines
+
+    # Exactly 22 data rows.
+    data_rows = [l for l in lines if l.startswith("| ") and "Cycle" not in l
+                 and "---" not in l]
+    assert len(data_rows) == 22
