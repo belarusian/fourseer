@@ -12,11 +12,12 @@ It performs no I/O, never mutates its input, and returns a list sorted by
 
 from __future__ import annotations
 
+import re
 from pathlib import PurePosixPath
 
 from fourseer.models import CycleMetrics, Run, Trajectory
 
-__all__ = ["build_cycle_metrics"]
+__all__ = ["build_cycle_metrics", "extract_tokens_cost", "render_report"]
 
 _SECONDS_PER_DAY = 86400
 
@@ -103,3 +104,106 @@ def build_cycle_metrics(run: Run) -> list[CycleMetrics]:
 
     metrics.sort(key=lambda m: m.cycle_no)
     return metrics
+
+
+# A conservative, line-anchored usage record: a line that is itself of the form
+# ``usage: tokens=<int> [cost=<float>]``. Line-anchored (``^``/``$``) so that
+# incidental prose — a shell ``usage()`` function, TypeScript ``prompt_tokens:
+# number;`` type declarations, or the word "usage" inside a comment — never
+# matches. ``tokens=<int>`` is required; ``cost=<float>`` is optional.
+_USAGE_RE = re.compile(
+    r"^\s*usage\s*:\s*tokens=(\d+)(?:\s+cost=([0-9]*\.?[0-9]+))?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# The single stable placeholder for a missing value in the rendered table.
+_PLACEHOLDER = "-"
+
+
+def render_report(metrics: list[CycleMetrics]) -> str:
+    """Render per-cycle metrics as a deterministic markdown table.
+
+    The output is a pure, deterministic, stdlib-only string transformation of
+    *metrics*:
+
+    - a header line ``# Per-Cycle Metrics (N cycles)`` where ``N`` is
+      ``len(metrics)``;
+    - a markdown table with columns ``Cycle | Outcome | Steps | Duration (s) |
+      Trajectory``;
+    - one row per metric, in the GIVEN order (the caller passes the already-
+      sorted :func:`build_cycle_metrics` output); the renderer does NOT re-sort;
+    - a ``None`` value (a kill's ``outcome``/``trajectory_name``, or the last
+      cycle's ``duration_seconds``) renders as the single stable placeholder
+      ``-`` so the table stays aligned and stable.
+
+    Parameters
+    ----------
+    metrics:
+        The per-cycle metrics to render. The function never mutates it.
+
+    Returns
+    -------
+    str
+        The rendered report (header + table), ending with a trailing newline.
+    """
+    lines: list[str] = [
+        f"# Per-Cycle Metrics ({len(metrics)} cycles)",
+        "",
+        "| Cycle | Outcome | Steps | Duration (s) | Trajectory |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for m in metrics:
+        outcome = m.outcome if m.outcome is not None else _PLACEHOLDER
+        duration = (
+            str(m.duration_seconds) if m.duration_seconds is not None else _PLACEHOLDER
+        )
+        trajectory = m.trajectory_name if m.trajectory_name is not None else _PLACEHOLDER
+        lines.append(
+            f"| {m.cycle_no} | {outcome} | {m.step_count} | {duration} | {trajectory} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def extract_tokens_cost(
+    trajectory: Trajectory,
+) -> tuple[int | None, float | None]:
+    """Extract ``(tokens, cost)`` from a trajectory's message content.
+
+    Scans each message's ``content`` for an explicit, unambiguous usage record
+    (see :data:`_USAGE_RE`). The match is conservative and line-anchored, so
+    incidental prose (a shell ``usage()`` function, TypeScript
+    ``prompt_tokens: number;`` type declarations, or the word "usage" in a
+    comment) never matches. When no record is present — the seed case, and any
+    trajectory without structured usage data — returns ``(None, None)``.
+
+    If multiple records are present, ``tokens`` is the sum of their token
+    counts and ``cost`` is the sum of their costs (deterministic, in message
+    order). ``cost`` is ``None`` when no record carries a cost figure.
+
+    Parameters
+    ----------
+    trajectory:
+        The trajectory to scan. The function never mutates it.
+
+    Returns
+    -------
+    tuple[int | None, float | None]
+        ``(tokens, cost)``; either or both may be ``None``.
+    """
+    total_tokens: int | None = None
+    total_cost: float | None = None
+    for message in trajectory.messages:
+        content = message.get("content")
+        if not isinstance(content, str):
+            continue
+        for match in _USAGE_RE.finditer(content):
+            tokens = int(match.group(1))
+            if total_tokens is None:
+                total_tokens = tokens
+            else:
+                total_tokens += tokens
+            cost_raw = match.group(2)
+            if cost_raw is not None:
+                cost = float(cost_raw)
+                total_cost = cost if total_cost is None else total_cost + cost
+    return total_tokens, total_cost
