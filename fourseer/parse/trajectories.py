@@ -8,7 +8,8 @@ those two keys, but the loader is deliberately tolerant:
 - a missing ``messages`` becomes ``[]``;
 - a missing ``step_count`` is derived as ``len(messages)``;
 - an explicit ``step_count`` (int) is honored when present;
-- extra top-level keys and extra per-message keys are ignored.
+- extra top-level keys and extra per-message keys are ignored;
+- each trajectory's ``name`` is set to the source file's basename (``f.name``).
 
 The loader is pure and deterministic: it reads files in sorted filename order
 so the returned list is stable across runs.
@@ -59,13 +60,21 @@ def load_trajectories(path: str | Path) -> list[Trajectory]:
             continue
         if not isinstance(data, dict):
             continue
-        out.append(_to_trajectory(data))
+        out.append(_to_trajectory(data, name=f.name))
     return out
 
 
-def _to_trajectory(data: dict) -> Trajectory:
+def _to_trajectory(data: dict, *, name: str = "") -> Trajectory:
     """Build a :class:`Trajectory` from one decoded JSON object, tolerating
-    missing/extra keys."""
+    missing/extra keys.
+
+    Parameters
+    ----------
+    data:
+        The decoded JSON object.
+    name:
+        The source filename (basename) to record on the trajectory, or ``""``.
+    """
     outcome = data.get("outcome")
     if outcome is not None and not isinstance(outcome, str):
         outcome = str(outcome)
@@ -82,4 +91,4 @@ def _to_trajectory(data: dict) -> Trajectory:
     else:
         step_count = len(messages)
 
-    return Trajectory(outcome=outcome, messages=messages, step_count=step_count)
+    return Trajectory(outcome=outcome, messages=messages, step_count=step_count, name=name)

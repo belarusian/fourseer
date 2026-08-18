@@ -13,6 +13,7 @@ import pytest
 from fourseer.models import (
     BuildOrderRow,
     CommitRecord,
+    ConsistencyIssue,
     CycleBlock,
     CycleRecord,
     GateLog,
@@ -104,3 +105,46 @@ def test_gate_log_and_cycle_block_have_independent_list_defaults() -> None:
     d = CycleBlock(cycle_no=2)
     c.lessons.append("lesson")
     assert d.lessons == []
+
+
+def test_trajectory_name_defaults_empty() -> None:
+    """Trajectory.name defaults to '' (backward compatible trailing field)."""
+    t = Trajectory(outcome="exit:task_complete")
+    assert t.name == ""
+
+
+def test_trajectory_name_explicit() -> None:
+    """Trajectory.name can be set explicitly (e.g. the source basename)."""
+    t = Trajectory(outcome="x", name="trajectory_0013.json")
+    assert t.name == "trajectory_0013.json"
+
+
+def test_consistency_issue_fields() -> None:
+    """ConsistencyIssue carries code / cycle_no / detail."""
+    i = ConsistencyIssue(code="orphan_trajectory_path", cycle_no=7, detail="no such file")
+    assert i.code == "orphan_trajectory_path"
+    assert i.cycle_no == 7
+    assert i.detail == "no such file"
+
+
+def test_consistency_issue_none_cycle_no() -> None:
+    """cycle_no may be None when the issue is not tied to a single cycle."""
+    i = ConsistencyIssue(code="build_order_range_gap", cycle_no=None, detail="d")
+    assert i.cycle_no is None
+
+
+def test_consistency_issue_is_frozen() -> None:
+    """ConsistencyIssue is a frozen dataclass: mutation raises."""
+    i = ConsistencyIssue(code="c", cycle_no=1, detail="d")
+    assert dataclasses.is_dataclass(i)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        i.code = "boom"
+
+
+def test_consistency_issue_hashable_and_equal() -> None:
+    """Two identical ConsistencyIssue instances compare equal and hash equal."""
+    a = ConsistencyIssue(code="c", cycle_no=1, detail="d")
+    b = ConsistencyIssue(code="c", cycle_no=1, detail="d")
+    assert a == b
+    assert hash(a) == hash(b)
+    assert len({a, b}) == 1

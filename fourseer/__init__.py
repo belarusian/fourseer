@@ -9,6 +9,7 @@ Public surface is re-exported here; submodules:
   - fourseer.models   : typed dataclasses for the parsed artifacts
   - fourseer.parse    : artifact parsers (trajectories, cycles.out, gate log, git)
   - fourseer.load     : top-level loader (composes the four parsers into a Run)
+  - fourseer.validate : cross-source consistency validation (validate_run)
   - fourseer.report   : per-cycle metrics
   - fourseer.taxonomy : failure-mode classification
   - fourseer.drift    : issue + plan drift detection
@@ -19,6 +20,7 @@ from fourseer.load import load_run
 from fourseer.models import (
     BuildOrderRow,
     CommitRecord,
+    ConsistencyIssue,
     CycleBlock,
     CycleRecord,
     GateLog,
@@ -31,6 +33,7 @@ from fourseer.parse import (
     parse_gate_log,
     read_git_history,
 )
+from fourseer.validate import validate_run
 
 __version__ = "0.1.0"
 __all__ = [
@@ -43,8 +46,11 @@ __all__ = [
     "GateLog",
     "CommitRecord",
     "Run",
+    "ConsistencyIssue",
     # loaders
     "load_run",
+    # validation
+    "validate_run",
     # parsers
     "load_trajectories",
     "parse_cycles_out",
