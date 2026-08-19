@@ -59,7 +59,7 @@ from fourseer.report import (
 from fourseer.taxonomy import classify_cycle, classify_run, render_taxonomy, summarize_taxonomy
 from fourseer.validate import validate_run
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 __all__ = [
     "__version__",
     # models
