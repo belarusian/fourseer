@@ -24,9 +24,16 @@ from __future__ import annotations
 
 import re
 
-from fourseer.models import CommitRecord, IssueDrift
+from fourseer.models import CommitRecord, GateLog, IssueDrift, PlanDrift
 
-__all__ = ["detect_issue_drift", "extract_closed_issues", "render_issue_drift"]
+__all__ = [
+    "detect_issue_drift",
+    "detect_plan_drift",
+    "extract_closed_issues",
+    "planned_cycle_set",
+    "render_issue_drift",
+    "render_plan_drift",
+]
 
 # Any ``#N`` token in a subject is an issue reference. This covers the
 # ``Closes`` / ``Fixes`` / ``Resolves`` / ``Refs`` / ``See`` prefixes (each of
@@ -160,4 +167,138 @@ def render_issue_drift(drift: list[IssueDrift]) -> str:
             lines.append(f"#{d.issue_no}: {d.commit_message} ({d.commit_hash})")
     else:
         lines.append("no issue drift detected")
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Plan drift
+# ---------------------------------------------------------------------------
+
+# A Build Order "Cycles" cell is either a single cycle number (``"7"``) or an
+# inclusive range (``"1-3"``). Anything else is unparseable and yields no cycles.
+_SINGLE_CYCLE = re.compile(r"^\s*(\d+)\s*$")
+_RANGE_CYCLE = re.compile(r"^\s*(\d+)\s*-\s*(\d+)\s*$")
+
+
+def _parse_cycle_range(cycles: str) -> set[int]:
+    """Parse a Build Order ``cycles`` cell into the set of cycle numbers it covers.
+
+    ``"1-3"`` -> ``{1, 2, 3}`` (inclusive range); ``"7"`` -> ``{7}`` (single
+    cycle). Whitespace around the tokens is tolerated. Any string that matches
+    neither form (e.g. ``""``, ``"TBD"``, ``"1-3-5"``) is unparseable and yields
+    the empty set — plan drift must be robust to malformed Build Order rows
+    rather than raise.
+    """
+    m = _RANGE_CYCLE.match(cycles)
+    if m:
+        lo, hi = int(m.group(1)), int(m.group(2))
+        if lo > hi:
+            # A reversed range (e.g. "5-2") is malformed; treat as unparseable.
+            return set()
+        return set(range(lo, hi + 1))
+    m = _SINGLE_CYCLE.match(cycles)
+    if m:
+        return {int(m.group(1))}
+    return set()
+
+
+def planned_cycle_set(gate_log: GateLog) -> set[int]:
+    """Return the set of cycle numbers the gate log's Build Order plans.
+
+    Each :class:`~fourseer.models.BuildOrderRow.cycles` cell is parsed (see
+    :func:`_parse_cycle_range`) and the per-row sets are unioned. An empty Build
+    Order (no rows) yields the empty set. Unparseable cells are tolerated (they
+    contribute nothing).
+
+    Pure, deterministic, stdlib-only; never mutates *gate_log*.
+
+    Parameters
+    ----------
+    gate_log:
+        The parsed gate log. Never mutated.
+
+    Returns
+    -------
+    set[int]
+        The union of every planned cycle number, or ``set()`` when the Build
+        Order is empty or every row is unparseable.
+    """
+    planned: set[int] = set()
+    for row in gate_log.build_order:
+        planned |= _parse_cycle_range(row.cycles)
+    return planned
+
+
+def detect_plan_drift(gate_log: GateLog, executed: set[int]) -> list[PlanDrift]:
+    """Detect cycles whose execution drifted from the Build Order plan.
+
+    The plan is :func:`planned_cycle_set`(*gate_log*); the executed set is the
+    caller-supplied *executed* (typically ``{c.cycle_no for c in run.cycles}``).
+    The symmetric difference is tagged by direction:
+
+    - a cycle in *executed* but not planned -> ``"executed_not_planned"``;
+    - a cycle planned but not in *executed* -> ``"planned_not_executed"``.
+
+    A cycle present in BOTH sets is on-plan and produces NO row. The result is
+    one :class:`~fourseer.models.PlanDrift` per drifted cycle (deduped, since a
+    cycle number can appear in at most one direction) sorted by ``cycle_no``.
+    It is ``[]`` when planned == executed, and is robust to an empty Build
+    Order (planned empty) and an empty executed set.
+
+    Pure, deterministic, stdlib-only; never mutates *gate_log* or *executed*.
+
+    Parameters
+    ----------
+    gate_log:
+        The parsed gate log (source of the plan). Never mutated.
+    executed:
+        The set of cycle numbers actually executed. Never mutated.
+
+    Returns
+    -------
+    list[PlanDrift]
+        One :class:`~fourseer.models.PlanDrift` per drifted cycle, sorted by
+        ``cycle_no``. Empty when the plan and the executed set agree.
+    """
+    planned = planned_cycle_set(gate_log)
+    drift: list[PlanDrift] = []
+    for cycle_no in sorted(executed - planned):
+        drift.append(PlanDrift(cycle_no=cycle_no, status="executed_not_planned"))
+    for cycle_no in sorted(planned - executed):
+        drift.append(PlanDrift(cycle_no=cycle_no, status="planned_not_executed"))
+    drift.sort(key=lambda d: d.cycle_no)
+    return drift
+
+
+def render_plan_drift(drift: list[PlanDrift]) -> str:
+    """Render a list of :class:`~fourseer.models.PlanDrift` as a short block.
+
+    A pure, deterministic, stdlib-only string transformation, consistent in
+    style with :func:`render_issue_drift`:
+
+    - a header line ``# Plan Drift (N cycles)`` where ``N`` is ``len(drift)``;
+    - when *drift* is non-empty, one line per drifted cycle in ``cycle_no``
+      order of the form ``cycle <n>: <status>``;
+    - when *drift* is empty, a single stable no-drift line
+      ``no plan drift detected``.
+
+    The output always ends with a trailing newline.
+
+    Parameters
+    ----------
+    drift:
+        The drift rows to render (typically the output of
+        :func:`detect_plan_drift`). Never mutated.
+
+    Returns
+    -------
+    str
+        The rendered drift block, ending with a trailing newline.
+    """
+    lines: list[str] = [f"# Plan Drift ({len(drift)} cycles)"]
+    if drift:
+        for d in sorted(drift, key=lambda d: d.cycle_no):
+            lines.append(f"cycle {d.cycle_no}: {d.status}")
+    else:
+        lines.append("no plan drift detected")
     return "\n".join(lines) + "\n"
