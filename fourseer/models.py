@@ -18,6 +18,7 @@ Models
 - :class:`RunSummary`      — run-level totals aggregated from per-cycle metrics.
 - :class:`CycleClassification` — one cycle's failure-mode classification (taxonomy output).
 - :class:`IssueDrift`       — one closed-in-commits-but-still-open issue (drift output).
+- :class:`PlanDrift`        — one cycle that drifted from the Build Order plan (drift output).
 
 Field semantics are documented per-field. Where a source artifact may omit a
 value (e.g. a wall-clock-killed cycle that never wrote an ``OUTER`` line), the
@@ -499,3 +500,37 @@ class IssueDrift:
     commit_hash: str
     commit_message: str
     code: str = "closed_but_still_open"
+
+
+@dataclass(frozen=True)
+class PlanDrift:
+    """One cycle whose execution drifted from the Build Order plan.
+
+    A pure, hashable, comparable value object describing a single cycle
+    mismatch between the gate log's "## Build Order" plan (the planned cycles,
+    parsed from each :class:`BuildOrderRow.cycles` range) and the set of cycles
+    actually executed (the caller-supplied ``CycleRecord.cycle_no`` values from
+    ``cycles.out``). Produced by :func:`fourseer.drift.detect_plan_drift`. It is
+    the per-cycle row of the plan-drift diff.
+
+    The closed set of ``status`` values is:
+
+    - ``"executed_not_planned"`` — the cycle ran (it is in the executed set) but
+      is not covered by any Build Order range.
+    - ``"planned_not_executed"`` — the cycle is covered by a Build Order range
+      but never ran (it is not in the executed set).
+
+    Attributes
+    ----------
+    cycle_no:
+        The integer cycle number that drifted.
+    status:
+        The drift direction, one of the two values above.
+    code:
+        A stable machine tag (snake_case) identifying the drift kind. Defaults
+        to ``"plan_drift"``.
+    """
+
+    cycle_no: int
+    status: str
+    code: str = "plan_drift"
