@@ -15,6 +15,12 @@ But there is no `cli.py` (see TICKET-049) and no subcommand that composes them.
 The README promises "taxonomy — failure-mode classes: wall-clock-kill,
 max_steps, red-gate, incomplete-vs-merged" with no command.
 
+Verified against the real seed (`load_run('/home/sasha/AI/fourseer/seed')`):
+`summarize_taxonomy(classify_run(run))` yields `cycle_count=22`,
+`mode_counts={'max_steps': 7, 'task_complete': 12, 'wall_clock_kill': 3}`,
+`gate_counts={'green': 20}` / `gate_unknown=2`,
+`merged_counts={'merged': 20}` / `merged_unknown=2`.
+
 ## Impact
 The documented `taxonomy` capability has no CLI surface. A user cannot run
 `fourseer taxonomy <ai-dir>` to get the run-level failure-mode distribution
@@ -32,7 +38,7 @@ Add `tests/test_cli.py::test_taxonomy_*` covering: a hand-built inline `Run`
 whose outcomes span at least two modes (e.g. one `max_steps_reached`, one
 `exit:task_complete`, one `None` kill) asserting the header
 `# Failure-Mode Taxonomy (N cycles)` and the `modes:` line; and exactly ONE
-real-seed test (gated on `seed_dir`) asserting the documented mode distribution
-for the seed (22 cycles; wall_clock_kill=3, max_steps_reached=5,
-task_complete=14 — pin the exact counts by running `classify_run` against the
-seed and recording them).
+real-seed test (gated on `seed_dir`) pinning the verified slice:
+`cycle_count=22`, `mode_counts={'max_steps': 7, 'task_complete': 12,
+'wall_clock_kill': 3}`, `gate_counts={'green': 20}` / `gate_unknown=2`,
+`merged_counts={'merged': 20}` / `merged_unknown=2`.
