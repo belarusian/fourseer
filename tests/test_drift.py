@@ -27,8 +27,15 @@ from pathlib import Path
 import pytest
 
 import fourseer
-from fourseer.drift import detect_issue_drift, extract_closed_issues, render_issue_drift
-from fourseer.models import CommitRecord, IssueDrift
+from fourseer.drift import (
+    detect_issue_drift,
+    detect_plan_drift,
+    extract_closed_issues,
+    planned_cycle_set,
+    render_issue_drift,
+    render_plan_drift,
+)
+from fourseer.models import BuildOrderRow, CommitRecord, GateLog, IssueDrift, PlanDrift
 
 
 def _commit(hash: str, subject: str) -> CommitRecord:
@@ -407,3 +414,349 @@ def test_drift_against_fourseer_repo_history(seed_dir) -> None:
 
     # No issue is still open -> no drift.
     assert detect_issue_drift(commits, set()) == []
+
+
+# ---------------------------------------------------------------------------
+# planned_cycle_set
+# ---------------------------------------------------------------------------
+
+
+def _row(cycles: str, phase: str = "P", target: str = "t") -> BuildOrderRow:
+    """A minimal :class:`BuildOrderRow` for a given ``cycles`` cell."""
+    return BuildOrderRow(phase=phase, cycles=cycles, target=target)
+
+
+def test_planned_single_range() -> None:
+    """A ``"1-3"`` range yields the inclusive set {1, 2, 3}."""
+    gate = GateLog(build_order=[_row("1-3")])
+    assert planned_cycle_set(gate) == {1, 2, 3}
+
+
+def test_planned_single_cycle() -> None:
+    """A bare ``"7"`` cell yields the single-cycle set {7}."""
+    gate = GateLog(build_order=[_row("7")])
+    assert planned_cycle_set(gate) == {7}
+
+
+def test_planned_union_across_rows() -> None:
+    """Multiple rows are unioned into one set."""
+    gate = GateLog(build_order=[_row("1-3"), _row("5"), _row("7-9")])
+    assert planned_cycle_set(gate) == {1, 2, 3, 5, 7, 8, 9}
+
+
+def test_planned_overlapping_rows_dedup() -> None:
+    """Overlapping ranges dedup into a single set."""
+    gate = GateLog(build_order=[_row("1-5"), _row("3-7")])
+    assert planned_cycle_set(gate) == {1, 2, 3, 4, 5, 6, 7}
+
+
+def test_planned_empty_build_order() -> None:
+    """No Build Order rows yields the empty set."""
+    assert planned_cycle_set(GateLog()) == set()
+    assert planned_cycle_set(GateLog(build_order=[])) == set()
+
+
+def test_planned_tolerates_unparseable() -> None:
+    """Unparseable cells contribute nothing (no raise)."""
+    gate = GateLog(build_order=[_row("TBD"), _row(""), _row("1-3-5"), _row("2")])
+    assert planned_cycle_set(gate) == {2}
+
+
+def test_planned_tolerates_reversed_range() -> None:
+    """A reversed range (``"5-2"``) is treated as unparseable."""
+    gate = GateLog(build_order=[_row("5-2"), _row("4")])
+    assert planned_cycle_set(gate) == {4}
+
+
+def test_planned_tolerates_whitespace() -> None:
+    """Whitespace around range tokens is tolerated."""
+    gate = GateLog(build_order=[_row(" 1 - 3 "), _row(" 7 ")])
+    assert planned_cycle_set(gate) == {1, 2, 3, 7}
+
+
+def test_planned_does_not_mutate_input() -> None:
+    """The gate log is not mutated."""
+    gate = GateLog(build_order=[_row("1-3")])
+    snapshot = list(gate.build_order)
+    planned_cycle_set(gate)
+    assert gate.build_order == snapshot
+
+
+# ---------------------------------------------------------------------------
+# detect_plan_drift
+# ---------------------------------------------------------------------------
+
+
+def test_drift_empty_when_planned_equals_executed() -> None:
+    """No drift when the plan and the executed set agree exactly."""
+    gate = GateLog(build_order=[_row("1-3")])
+    assert detect_plan_drift(gate, {1, 2, 3}) == []
+
+
+def test_drift_executed_not_planned() -> None:
+    """Cycles executed but not planned are tagged executed_not_planned."""
+    gate = GateLog(build_order=[_row("1-3")])
+    drift = detect_plan_drift(gate, {1, 2, 3, 5, 6})
+    assert drift == [
+        PlanDrift(cycle_no=5, status="executed_not_planned"),
+        PlanDrift(cycle_no=6, status="executed_not_planned"),
+    ]
+
+
+def test_drift_planned_not_executed() -> None:
+    """Cycles planned but not executed are tagged planned_not_executed."""
+    gate = GateLog(build_order=[_row("1-3")])
+    drift = detect_plan_drift(gate, {1})
+    assert drift == [
+        PlanDrift(cycle_no=2, status="planned_not_executed"),
+        PlanDrift(cycle_no=3, status="planned_not_executed"),
+    ]
+
+
+def test_drift_both_directions_sorted_by_cycle_no() -> None:
+    """Drift from both directions is merged and sorted by cycle_no."""
+    gate = GateLog(build_order=[_row("1-3")])
+    drift = detect_plan_drift(gate, {3, 5})
+    assert drift == [
+        PlanDrift(cycle_no=1, status="planned_not_executed"),
+        PlanDrift(cycle_no=2, status="planned_not_executed"),
+        PlanDrift(cycle_no=5, status="executed_not_planned"),
+    ]
+
+
+def test_drift_common_cycles_produce_no_row() -> None:
+    """A cycle in both sets is on-plan and yields no row."""
+    gate = GateLog(build_order=[_row("1-3")])
+    drift = detect_plan_drift(gate, {1, 2, 3, 4})
+    # 1, 2, 3 are common -> no rows; only 4 (executed_not_planned) remains.
+    assert drift == [PlanDrift(cycle_no=4, status="executed_not_planned")]
+
+
+def test_drift_empty_build_order_all_executed_not_planned() -> None:
+    """An empty Build Order means every executed cycle is executed_not_planned."""
+    gate = GateLog()
+    drift = detect_plan_drift(gate, {2, 1})
+    assert drift == [
+        PlanDrift(cycle_no=1, status="executed_not_planned"),
+        PlanDrift(cycle_no=2, status="executed_not_planned"),
+    ]
+
+
+def test_drift_empty_executed_all_planned_not_executed() -> None:
+    """An empty executed set means every planned cycle is planned_not_executed."""
+    gate = GateLog(build_order=[_row("1-3")])
+    drift = detect_plan_drift(gate, set())
+    assert drift == [
+        PlanDrift(cycle_no=1, status="planned_not_executed"),
+        PlanDrift(cycle_no=2, status="planned_not_executed"),
+        PlanDrift(cycle_no=3, status="planned_not_executed"),
+    ]
+
+
+def test_drift_both_empty() -> None:
+    """Empty Build Order and empty executed set yield no drift."""
+    assert detect_plan_drift(GateLog(), set()) == []
+
+
+def test_drift_deduped_one_row_per_cycle() -> None:
+    """Each drifted cycle appears exactly once (no duplicate rows)."""
+    gate = GateLog(build_order=[_row("1-3"), _row("1-3")])
+    drift = detect_plan_drift(gate, {3, 5})
+    cycle_nos = [d.cycle_no for d in drift]
+    assert cycle_nos == sorted(cycle_nos)
+    assert len(cycle_nos) == len(set(cycle_nos))
+
+
+def test_drift_code_defaults_to_plan_drift() -> None:
+    """Every emitted row carries the default ``plan_drift`` code."""
+    gate = GateLog(build_order=[_row("1-3")])
+    for d in detect_plan_drift(gate, {3, 5}):
+        assert d.code == "plan_drift"
+
+
+def test_detect_plan_drift_deterministic() -> None:
+    """Repeated calls on the same input produce identical output."""
+    gate = GateLog(build_order=[_row("1-3")])
+    assert detect_plan_drift(gate, {3, 5}) == detect_plan_drift(gate, {3, 5})
+
+
+def test_detect_plan_drift_does_not_mutate_inputs() -> None:
+    """Neither the gate log nor the executed set is mutated."""
+    gate = GateLog(build_order=[_row("1-3")])
+    executed = {3, 5}
+    snapshot_rows = list(gate.build_order)
+    snapshot_executed = set(executed)
+    detect_plan_drift(gate, executed)
+    assert gate.build_order == snapshot_rows
+    assert executed == snapshot_executed
+
+
+# ---------------------------------------------------------------------------
+# render_plan_drift
+# ---------------------------------------------------------------------------
+
+
+def test_render_plan_drift_empty() -> None:
+    """An empty list renders the stable no-drift line."""
+    assert render_plan_drift([]) == "# Plan Drift (0 cycles)\nno plan drift detected\n"
+
+
+def test_render_plan_drift_single() -> None:
+    """A single row renders one ``cycle <n>: <status>`` line."""
+    drift = [PlanDrift(cycle_no=5, status="executed_not_planned")]
+    assert render_plan_drift(drift) == (
+        "# Plan Drift (1 cycles)\n"
+        "cycle 5: executed_not_planned\n"
+    )
+
+
+def test_render_plan_drift_multiple_sorted() -> None:
+    """Rows render in cycle_no order regardless of input order."""
+    drift = [
+        PlanDrift(cycle_no=5, status="executed_not_planned"),
+        PlanDrift(cycle_no=1, status="planned_not_executed"),
+        PlanDrift(cycle_no=3, status="planned_not_executed"),
+    ]
+    assert render_plan_drift(drift) == (
+        "# Plan Drift (3 cycles)\n"
+        "cycle 1: planned_not_executed\n"
+        "cycle 3: planned_not_executed\n"
+        "cycle 5: executed_not_planned\n"
+    )
+
+
+def test_render_plan_drift_header_counts_cycles() -> None:
+    """The header reports the number of drifted cycles."""
+    drift = [
+        PlanDrift(cycle_no=1, status="planned_not_executed"),
+        PlanDrift(cycle_no=2, status="planned_not_executed"),
+        PlanDrift(cycle_no=3, status="planned_not_executed"),
+    ]
+    assert render_plan_drift(drift).startswith("# Plan Drift (3 cycles)\n")
+
+
+def test_render_plan_drift_ends_with_newline() -> None:
+    """The rendered block always ends with a trailing newline."""
+    assert render_plan_drift([]).endswith("\n")
+    assert render_plan_drift(
+        [PlanDrift(cycle_no=1, status="planned_not_executed")]
+    ).endswith("\n")
+
+
+def test_render_plan_drift_deterministic() -> None:
+    """Repeated calls on the same input produce identical output."""
+    drift = [PlanDrift(cycle_no=5, status="executed_not_planned")]
+    assert render_plan_drift(drift) == render_plan_drift(drift)
+
+
+def test_render_plan_drift_does_not_mutate_input() -> None:
+    """The input list is not mutated (rendering sorts a copy)."""
+    drift = [
+        PlanDrift(cycle_no=20, status="executed_not_planned"),
+        PlanDrift(cycle_no=10, status="planned_not_executed"),
+    ]
+    snapshot = list(drift)
+    render_plan_drift(drift)
+    assert drift == snapshot
+
+
+# ---------------------------------------------------------------------------
+# PlanDrift value object
+# ---------------------------------------------------------------------------
+
+
+def test_plan_drift_fields() -> None:
+    """PlanDrift carries cycle_no / status / code."""
+    d = PlanDrift(cycle_no=7, status="executed_not_planned", code="plan_drift")
+    assert d.cycle_no == 7
+    assert d.status == "executed_not_planned"
+    assert d.code == "plan_drift"
+
+
+def test_plan_drift_code_defaults() -> None:
+    """Omitting ``code`` defaults it to the stable machine tag."""
+    d = PlanDrift(cycle_no=7, status="planned_not_executed")
+    assert d.code == "plan_drift"
+
+
+def test_plan_drift_is_frozen() -> None:
+    """PlanDrift is a frozen dataclass: mutation raises."""
+    d = PlanDrift(cycle_no=1, status="executed_not_planned")
+    assert dataclasses.is_dataclass(d)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        d.cycle_no = 99
+
+
+def test_plan_drift_hashable_and_equal() -> None:
+    """Two identical PlanDrift instances compare equal and hash equal."""
+    a = PlanDrift(cycle_no=1, status="executed_not_planned")
+    b = PlanDrift(cycle_no=1, status="executed_not_planned")
+    assert a == b
+    assert hash(a) == hash(b)
+    assert len({a, b}) == 1
+
+
+def test_plan_drift_distinct_status_not_equal() -> None:
+    """Two PlanDrift rows differing only in status are not equal."""
+    a = PlanDrift(cycle_no=1, status="executed_not_planned")
+    b = PlanDrift(cycle_no=1, status="planned_not_executed")
+    assert a != b
+
+
+# ---------------------------------------------------------------------------
+# package-root re-exports (plan drift)
+# ---------------------------------------------------------------------------
+
+
+def test_public_api_reexports_plan_drift() -> None:
+    """The plan-drift symbols are importable from the package root and in __all__."""
+    assert fourseer.planned_cycle_set is planned_cycle_set
+    assert fourseer.detect_plan_drift is detect_plan_drift
+    assert fourseer.render_plan_drift is render_plan_drift
+    assert fourseer.PlanDrift is PlanDrift
+    for name in (
+        "PlanDrift",
+        "planned_cycle_set",
+        "detect_plan_drift",
+        "render_plan_drift",
+    ):
+        assert name in fourseer.__all__
+
+
+# ---------------------------------------------------------------------------
+# real seed (gated on the seed_dir fixture)
+# ---------------------------------------------------------------------------
+
+
+def test_plan_drift_against_real_seed(seed_dir) -> None:
+    """Run plan drift on the real seed and pin the expected drift sets.
+
+    The seed's Build Order plans cycles 1-20 (six ranges: 1-3, 4-6, 7-9,
+    10-13, 14-17, 18-20); its ``cycles.out`` executed cycles 7-28. So the
+    drift is: executed_not_planned {21..28} and planned_not_executed {1..6}.
+    """
+    from fourseer.load import load_run
+
+    run = load_run(seed_dir)
+    executed = {c.cycle_no for c in run.cycles}
+
+    planned = planned_cycle_set(run.gate_log)
+    assert planned == set(range(1, 21))
+    assert executed == set(range(7, 29))
+
+    drift = detect_plan_drift(run.gate_log, executed)
+    executed_not_planned = {
+        d.cycle_no for d in drift if d.status == "executed_not_planned"
+    }
+    planned_not_executed = {
+        d.cycle_no for d in drift if d.status == "planned_not_executed"
+    }
+    assert executed_not_planned == {21, 22, 23, 24, 25, 26, 27, 28}
+    assert planned_not_executed == {1, 2, 3, 4, 5, 6}
+
+    # One row per drifted cycle, sorted by cycle_no, no overlap between sets.
+    cycle_nos = [d.cycle_no for d in drift]
+    assert cycle_nos == sorted(cycle_nos)
+    assert len(cycle_nos) == len(set(cycle_nos))
+    assert executed_not_planned.isdisjoint(planned_not_executed)
+    assert len(drift) == len(executed_not_planned) + len(planned_not_executed)
