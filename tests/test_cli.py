@@ -19,7 +19,6 @@ import pytest
 
 from fourseer.cli import main
 
-
 # --- Inline fixture content -------------------------------------------------
 # A minimal run: cycles 1 (completed), 2 (wall-clock kill), 3 (completed).
 # The Build Order plans cycles 1-2 and 5-6, so plan drift surfaces cycle 3

@@ -18,6 +18,12 @@ From the ``### Results`` table the parser captures two rows when present: the
 carries a commit hash / PR reference, ``False`` when it is an em-dash or empty).
 A block with no ``### Results`` table leaves both ``None``.
 
+Alternate block dialects are also accepted: a ``**Lessons:**`` line (with
+numbered or ``-`` bullet items) stands in for ``### Lessons``; a two-column
+``| Area | Status |`` gate table without a ``### Results`` header contributes
+its pytest row to ``gate_after``; and a ``**Delivery:**`` line naming a merge
+into ``main`` sets ``merged`` to ``True``.
+
 Parsing is pure and deterministic. The remaining free-form prose (``### What We
 Did``) is ignored.
 """
@@ -35,12 +41,13 @@ _CYCLE_HEADER_RE = re.compile(r"^##\s+Cycle\s+(?P<num>\d+)\b\s*(?P<rest>.*)$")
 _DATE_RE = re.compile(r"^\*\*Date:\*\*\s*(?P<val>.+?)\s*$")
 _HEAD_START_RE = re.compile(r"^\*\*HEAD \(start\):\*\*\s*(?P<val>.+?)\s*$")
 _HEAD_END_RE = re.compile(r"^\*\*HEAD \(end\):\*\*\s*(?P<val>.+?)\s*$")
-_LESSONS_HEADER_RE = re.compile(r"^###\s+Lessons\b")
-_LESSON_ITEM_RE = re.compile(r"^\s*\d+\.\s+(?P<val>.+?)\s*$")
+_LESSONS_HEADER_RE = re.compile(r"^(?:###\s+Lessons\b|\*\*Lessons:?\*\*)")
+_LESSON_ITEM_RE = re.compile(r"^\s*(?:\d+\.|-)\s+(?P<val>.+?)\s*$")
 _RESULTS_HEADER_RE = re.compile(r"^###\s+Results\b")
 _BUILD_ORDER_HEADER_RE = re.compile(r"^##\s+Build Order\b")
 _TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$")
 _TABLE_SEP_RE = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
+_DELIVERY_RE = re.compile(r"""^\*\*Delivery:.*->\s*[`'"]?main\b""")
 
 # A "Merged on main" After cell that is one of these means "not merged".
 _MERGED_ABSENT = {"", "—", "–", "-"}
@@ -208,6 +215,27 @@ def _parse_cycle_blocks(lines: list[str]) -> list[CycleBlock]:
             hem = _HEAD_END_RE.match(line)
             if hem:
                 current["head_end"] = hem.group("val")
+                continue
+            if _DELIVERY_RE.match(line):
+                current["merged"] = True
+                continue
+            tmm = _TABLE_ROW_RE.match(line)
+            if tmm is not None and not _TABLE_SEP_RE.match(line):
+                cells = [c.strip() for c in tmm.group(1).split("|")]
+                if len(cells) == 2:
+                    label = cells[0].lower()
+                    status = cells[1].lower()
+                    if "pytest" in label or "build+test" in label or label == "gate":
+                        if "fail" in status:
+                            current["gate_after"] = "red"
+                        else:
+                            current["gate_after"] = (
+                                "green"
+                                if any(
+                                    k in status for k in ("passed", "green", "ok")
+                                )
+                                else "red"
+                            )
                 continue
 
     _flush()
