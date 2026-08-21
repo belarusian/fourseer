@@ -182,8 +182,8 @@ def test_render_report_header_and_empty() -> None:
     assert "| Cycle | Outcome | Steps | Duration (s) | Trajectory |" in lines
     assert "| --- | --- | --- | --- | --- |" in lines
     # No data rows.
-    assert not any(l.startswith("| ") and l != "| --- | --- | --- | --- | --- |"
-                   and "Cycle" not in l for l in lines[3:])
+    assert not any(line.startswith("| ") and line != "| --- | --- | --- | --- | --- |"
+                   and "Cycle" not in line for line in lines[3:])
 
 
 def test_render_report_kill_row_placeholders() -> None:
@@ -208,8 +208,8 @@ def test_render_report_preserves_given_order() -> None:
     text = render_report(metrics)
     lines = text.splitlines()
     # The three data rows, in input order 10, 7, 8.
-    data_rows = [l for l in lines if l.startswith("| ") and "Cycle" not in l
-                 and "---" not in l]
+    data_rows = [line for line in lines if line.startswith("| ") and "Cycle" not in line
+                 and "---" not in line]
     assert data_rows == [
         "| 10 | x | 1 | 10 | t10.json |",
         "| 7 | x | 2 | 20 | t7.json |",
@@ -322,8 +322,8 @@ def test_real_seed_report(seed_dir) -> None:
     assert "| 28 | exit:task_complete | 39 | - | trajectory_0043.json |" in lines
 
     # Exactly 22 data rows.
-    data_rows = [l for l in lines if l.startswith("| ") and "Cycle" not in l
-                 and "---" not in l]
+    data_rows = [line for line in lines if line.startswith("| ") and "Cycle" not in line
+                 and "---" not in line]
     assert len(data_rows) == 22
 
 # ---------------------------------------------------------------------------
