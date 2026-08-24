@@ -105,3 +105,80 @@ def test_dialect_head_and_dates_still_parsed() -> None:
     assert blocks[12].head_start == "830048d (Cycle 11 merge on main)"
     assert blocks[12].head_end == "7df02d0 (PR #60 follow-up squash-merge on main)"
     assert gl.build_order[0].phase == "mine"
+
+
+# ---------------------------------------------------------------------------
+# Committed per-dialect regression fixtures (TICKET-057/060)
+# ---------------------------------------------------------------------------
+
+from pathlib import Path  # noqa: E402
+
+_FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _load(name: str):
+    return parse_gate_log((_FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def test_seed_dialect_fixture() -> None:
+    """The committed seed-dialect fixture parses gate/merged/pr_numbers."""
+    gl = _load("dialect_seed.md")
+    b = gl.cycles[0]
+    assert b.cycle_no == 3
+    assert b.gate_after == "green"
+    assert b.merged is True
+    # The seed dialect records the PR number from the "merge of PR #6" HEAD line.
+    assert b.pr_numbers == [6]
+
+
+def test_resume_forge_dialect_fixture() -> None:
+    """The committed resume-forge fixture parses gate/merged (no PR numbers)."""
+    gl = _load("dialect_resume_forge.md")
+    b = gl.cycles[0]
+    assert b.cycle_no == 12
+    assert b.gate_after == "green"
+    assert b.merged is True
+    assert b.pr_numbers == []
+
+
+def test_launch_gate_dialect_fixture() -> None:
+    """The committed launch-gate fixture parses gate/merged + the PR number."""
+    gl = _load("dialect_launch_gate.md")
+    b = gl.cycles[0]
+    assert b.cycle_no == 5
+    assert b.gate_after == "green"
+    assert b.merged is True
+    assert b.pr_numbers == [18]
+
+
+# ---------------------------------------------------------------------------
+# Plain-line 'PR #<n> MERGED' merge evidence (TICKET-057)
+# ---------------------------------------------------------------------------
+
+
+def test_plain_line_pr_merged_sets_merged_and_pr_numbers() -> None:
+    """A plain 'PR #<n> MERGED' line (no table) is merge evidence."""
+    text = "## Cycle 7: plain line\nPR #42 MERGED (squash-merge on main)\n"
+    b = parse_gate_log(text).cycles[0]
+    assert b.merged is True
+    assert b.pr_numbers == [42]
+
+
+def test_plain_line_pr_merged_case_insensitive() -> None:
+    """The MERGED keyword is matched case-insensitively."""
+    text = "## Cycle 7: plain line\nPR #42 merged (squash)\n"
+    b = parse_gate_log(text).cycles[0]
+    assert b.merged is True
+    assert b.pr_numbers == [42]
+
+
+def test_indented_prose_is_not_plain_line_merge_evidence() -> None:
+    """An indented prose line mentioning 'PR #<n> ... merged' is NOT evidence."""
+    text = (
+        "## Cycle 9: prose\n"
+        "- **Phase 5 GATE:** build clean, pushed,\n"
+        "  PR #17, CI green, merged `--merge --delete-branch`, closed issues #13-16.\n"
+    )
+    b = parse_gate_log(text).cycles[0]
+    assert b.merged is None
+    assert b.pr_numbers == []

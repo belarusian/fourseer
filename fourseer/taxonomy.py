@@ -46,6 +46,12 @@ MODE_EXECUTION_ERROR = "execution_error"
 MODE_FORMAT_ERROR = "format_error"
 MODE_OTHER = "other"
 
+# The closed set of landed-vs-lost tags (documented on
+# :class:`CycleClassification.landed`).
+LANDED = "landed"
+LOST = "lost"
+UNKNOWN = "unknown"
+
 # The single stable placeholder for an empty distribution in the rendered block.
 _PLACEHOLDER = "-"
 
@@ -86,17 +92,34 @@ def classify_cycle(
     mode = _mode_from_outcome(metrics.outcome)
     gate: str | None = None
     merged: bool | None = None
+    landed: str | None = None
     if gate_log is not None:
         for block in gate_log.cycles:
             if block.cycle_no == metrics.cycle_no:
                 gate = block.gate_after
                 merged = block.merged
+                # The cycle ran (it is in the metrics) and a matching block
+                # exists. Merge evidence is ``merged is True`` OR
+                # ``pr_numbers`` non-empty: landed when present, lost when the
+                # block definitively says it was not merged (``merged is
+                # False``), unknown when the evidence is incomplete (``merged
+                # is None`` and no PR numbers).
+                if merged is True or block.pr_numbers:
+                    landed = LANDED
+                elif merged is False:
+                    landed = LOST
+                else:
+                    landed = UNKNOWN
                 break
+        else:
+            # The cycle ran but has no matching gate-log block: lost.
+            landed = LOST
     return CycleClassification(
         cycle_no=metrics.cycle_no,
         mode=mode,
         gate=gate,
         merged=merged,
+        landed=landed,
     )
 
 
@@ -155,8 +178,10 @@ def summarize_taxonomy(
     mode_counts: dict[str, int] = {}
     gate_counts: dict[str, int] = {}
     merged_counts: dict[str, int] = {}
+    landed_counts: dict[str, int] = {}
     gate_unknown = 0
     merged_unknown = 0
+    landed_unknown = 0
 
     for c in classifications:
         mode_counts[c.mode] = mode_counts.get(c.mode, 0) + 1
@@ -169,6 +194,10 @@ def summarize_taxonomy(
         else:
             key = "merged" if c.merged else "not_merged"
             merged_counts[key] = merged_counts.get(key, 0) + 1
+        if c.landed is None:
+            landed_unknown += 1
+        else:
+            landed_counts[c.landed] = landed_counts.get(c.landed, 0) + 1
 
     return TaxonomySummary(
         cycle_count=cycle_count,
@@ -177,6 +206,8 @@ def summarize_taxonomy(
         gate_unknown=gate_unknown,
         merged_counts=merged_counts,
         merged_unknown=merged_unknown,
+        landed_counts=landed_counts,
+        landed_unknown=landed_unknown,
     )
 
 
@@ -196,6 +227,9 @@ def render_taxonomy(summary: TaxonomySummary) -> str:
       when there are no cycles;
     - a ``merged:`` line listing each merge flag and its count, sorted by flag,
       followed by ``unknown: <n>`` when ``merged_unknown`` is non-zero, or
+      ``-`` when there are no cycles;
+    - a ``landed:`` line listing each landed tag and its count, sorted by tag,
+      followed by ``unknown: <n>`` when ``landed_unknown`` is non-zero, or
       ``-`` when there are no cycles.
 
     Parameters
@@ -241,5 +275,15 @@ def render_taxonomy(summary: TaxonomySummary) -> str:
     else:
         merged = _PLACEHOLDER
     lines.append(f"merged: {merged}")
+
+    if summary.landed_counts:
+        landed = ", ".join(
+            f"{tag}={summary.landed_counts[tag]}" for tag in sorted(summary.landed_counts)
+        )
+        if summary.landed_unknown:
+            landed += f", unknown={summary.landed_unknown}"
+    else:
+        landed = _PLACEHOLDER
+    lines.append(f"landed: {landed}")
 
     return "\n".join(lines) + "\n"

@@ -1,0 +1,14 @@
+========== CYCLE 2  15:00:29Z ==========
+./run-cycles.sh: line 77: 415026 Alarm clock             perl -e 'alarm shift; exec @ARGV' 3600 python3 "$RUN" --goal "$GOAL" --inner "$INNER" --inner-seconds 3000 --log "$LOG" --trajectories "$AI/trajectories" --project-dir "$PROJ" --outer-steps 40 < /dev/null
+On branch main
+Your branch is up to date with 'origin/main'.
+
+nothing to commit, working tree clean
+========== CYCLE 2 done ==========
+========== CYCLE 5  17:10:48Z ==========
+./run-cycles.sh: line 77: 419416 Alarm clock             perl -e 'alarm shift; exec @ARGV' 3600 python3 "$RUN" --goal "$GOAL" --inner "$INNER" --inner-seconds 3000 --log "$LOG" --trajectories "$AI/trajectories" --project-dir "$PROJ" --outer-steps 40 < /dev/null
+On branch main
+Your branch is up to date with 'origin/main'.
+
+nothing to commit, working tree clean
+========== CYCLE 5 done ==========
