@@ -113,10 +113,9 @@ def main(argv: list[str] | None = None) -> int:
     run = load_run(ai_dir)
 
     if args.command == "report":
-        landed_by_cycle = {
-            c.cycle_no: c.landed for c in classify_run(run) if c.landed is not None
-        }
-        _emit(render_report(build_cycle_metrics(run), landed_by_cycle=landed_by_cycle))
+        metrics = build_cycle_metrics(run)
+        classifications = classify_run(run)
+        _emit(render_report(metrics, classifications))
     elif args.command == "taxonomy":
         _emit(render_taxonomy(summarize_taxonomy(classify_run(run))))
     elif args.command == "drift":

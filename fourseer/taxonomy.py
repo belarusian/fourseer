@@ -92,7 +92,7 @@ def classify_cycle(
     mode = _mode_from_outcome(metrics.outcome)
     gate: str | None = None
     merged: bool | None = None
-    landed: str | None = None
+    landed_lost: str = "unknown"
     if gate_log is not None:
         for block in gate_log.cycles:
             if block.cycle_no == metrics.cycle_no:
@@ -104,22 +104,22 @@ def classify_cycle(
                 # block definitively says it was not merged (``merged is
                 # False``), unknown when the evidence is incomplete (``merged
                 # is None`` and no PR numbers).
-                if merged is True or block.pr_numbers:
-                    landed = LANDED
+                if merged is True:
+                    landed_lost = LANDED
                 elif merged is False:
-                    landed = LOST
+                    landed_lost = LOST
                 else:
-                    landed = UNKNOWN
+                    landed_lost = UNKNOWN
                 break
         else:
             # The cycle ran but has no matching gate-log block: lost.
-            landed = LOST
+            landed_lost = LOST
     return CycleClassification(
         cycle_no=metrics.cycle_no,
         mode=mode,
         gate=gate,
         merged=merged,
-        landed=landed,
+        landed_lost=landed_lost,
     )
 
 
@@ -178,10 +178,10 @@ def summarize_taxonomy(
     mode_counts: dict[str, int] = {}
     gate_counts: dict[str, int] = {}
     merged_counts: dict[str, int] = {}
-    landed_counts: dict[str, int] = {}
+    landed_lost_counts: dict[str, int] = {}
     gate_unknown = 0
     merged_unknown = 0
-    landed_unknown = 0
+    landed_lost_unknown = 0
 
     for c in classifications:
         mode_counts[c.mode] = mode_counts.get(c.mode, 0) + 1
@@ -194,10 +194,10 @@ def summarize_taxonomy(
         else:
             key = "merged" if c.merged else "not_merged"
             merged_counts[key] = merged_counts.get(key, 0) + 1
-        if c.landed is None:
-            landed_unknown += 1
+        if c.landed_lost == "unknown":
+            landed_lost_unknown += 1
         else:
-            landed_counts[c.landed] = landed_counts.get(c.landed, 0) + 1
+            landed_lost_counts[c.landed_lost] = landed_lost_counts.get(c.landed_lost, 0) + 1
 
     return TaxonomySummary(
         cycle_count=cycle_count,
@@ -206,8 +206,8 @@ def summarize_taxonomy(
         gate_unknown=gate_unknown,
         merged_counts=merged_counts,
         merged_unknown=merged_unknown,
-        landed_counts=landed_counts,
-        landed_unknown=landed_unknown,
+        landed_lost_counts=landed_lost_counts,
+        landed_lost_unknown=landed_lost_unknown,
     )
 
 
@@ -276,14 +276,14 @@ def render_taxonomy(summary: TaxonomySummary) -> str:
         merged = _PLACEHOLDER
     lines.append(f"merged: {merged}")
 
-    if summary.landed_counts:
-        landed = ", ".join(
-            f"{tag}={summary.landed_counts[tag]}" for tag in sorted(summary.landed_counts)
+    if summary.landed_lost_counts:
+        landed_lost = ", ".join(
+            f"{tag}={summary.landed_lost_counts[tag]}" for tag in sorted(summary.landed_lost_counts)
         )
-        if summary.landed_unknown:
-            landed += f", unknown={summary.landed_unknown}"
+        if summary.landed_lost_unknown:
+            landed_lost += f", unknown={summary.landed_lost_unknown}"
     else:
-        landed = _PLACEHOLDER
-    lines.append(f"landed: {landed}")
+        landed_lost = _PLACEHOLDER
+    lines.append(f"landed/lost: {landed_lost}")
 
     return "\n".join(lines) + "\n"

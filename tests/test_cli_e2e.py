@@ -73,8 +73,8 @@ def test_e2e_taxonomy_landed_golden_fixture() -> None:
     fixture = Path(__file__).parent / "fixtures" / "launch_gate"
     proc = _run_cli("taxonomy", str(fixture))
     assert proc.returncode == 0
-    # The landed dimension distinguishes the two wall-clock kills.
-    assert "landed: landed=1, lost=1" in proc.stdout
+    # The landed/lost dimension distinguishes the two wall-clock kills.
+    assert "landed/lost: landed=1, lost=1" in proc.stdout
     # gates:/merged: are populated from the launch-gate dialect (not ``-``).
     assert "gates: green=1, unknown=1" in proc.stdout
     assert "merged: merged=1, unknown=1" in proc.stdout

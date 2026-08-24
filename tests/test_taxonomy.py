@@ -542,10 +542,10 @@ def test_golden_fixture_lost_vs_landed() -> None:
     assert set(by_no) == {2, 5}
     # Cycle 2: a wall-clock kill with NO gate-log block -> lost.
     assert by_no[2].mode == "wall_clock_kill"
-    assert by_no[2].landed == "lost"
+    assert by_no[2].landed_lost == "lost"
     # Cycle 5: a wall-clock kill whose block carries merge evidence -> landed.
     assert by_no[5].mode == "wall_clock_kill"
-    assert by_no[5].landed == "landed"
+    assert by_no[5].landed_lost == "landed"
 
 
 def test_golden_fixture_landed_distribution_and_render() -> None:
@@ -554,13 +554,13 @@ def test_golden_fixture_landed_distribution_and_render() -> None:
     run = load_run(_GOLDEN_FIXTURE)
     s = summarize_taxonomy(classify_run(run))
 
-    assert s.landed_counts == {"landed": 1, "lost": 1}
-    assert s.landed_unknown == 0
+    assert s.landed_lost_counts == {"landed": 1, "lost": 1}
+    assert s.landed_lost_unknown == 0
     # The partition invariant holds for the landed dimension.
-    assert sum(s.landed_counts.values()) + s.landed_unknown == s.cycle_count
+    assert sum(s.landed_lost_counts.values()) + s.landed_lost_unknown == s.cycle_count
 
     out = render_taxonomy(s)
-    assert "landed: landed=1, lost=1" in out
+    assert "landed/lost: landed=1, lost=1" in out
 
 
 def test_landed_render_empty_placeholder() -> None:
@@ -572,11 +572,11 @@ def test_landed_render_empty_placeholder() -> None:
         gate_unknown=1,
         merged_counts={},
         merged_unknown=1,
-        landed_counts={},
-        landed_unknown=1,
+        landed_lost_counts={},
+        landed_lost_unknown=1,
     )
     out = render_taxonomy(s)
-    assert "landed: -" in out
+    assert "landed/lost: -" in out
 
 
 def test_landed_render_with_unknown_suffix() -> None:
@@ -588,27 +588,26 @@ def test_landed_render_with_unknown_suffix() -> None:
         gate_unknown=3,
         merged_counts={},
         merged_unknown=3,
-        landed_counts={"landed": 1, "lost": 1},
-        landed_unknown=1,
+        landed_lost_counts={"landed": 1, "lost": 1},
+        landed_lost_unknown=1,
     )
     out = render_taxonomy(s)
-    assert "landed: landed=1, lost=1, unknown=1" in out
+    assert "landed/lost: landed=1, lost=1, unknown=1" in out
 
 
-def test_landed_when_block_has_pr_numbers_only() -> None:
-    """A block with pr_numbers non-empty (merged None) is landed.
+def test_landed_lost_when_block_has_no_merge_evidence() -> None:
+    """A block with merged None is unknown.
 
-    Ticket 058: landed when the block carries merge evidence, i.e. ``merged is
-    True`` OR ``pr_numbers`` non-empty. PR numbers alone are sufficient.
+    Ticket 058: landed_lost is derived from merged only (no pr_numbers).
     """
-    block = CycleBlock(cycle_no=5, pr_numbers=[18], gate_after="green")  # merged None
+    block = CycleBlock(cycle_no=5, merged=None, gate_after="green")
     c = classify_cycle(_metrics(5, None), _gate_log([block]))
     assert c.mode == "wall_clock_kill"
-    assert c.landed == "landed"
+    assert c.landed_lost == "unknown"
 
 
-def test_lost_when_block_merged_false_even_with_no_prs() -> None:
-    """A block with merged False (no PR numbers) is lost."""
+def test_lost_when_block_merged_false() -> None:
+    """A block with merged False is lost."""
     block = CycleBlock(cycle_no=4, merged=False, gate_after="red")
     c = classify_cycle(_metrics(4, "max_steps_reached"), _gate_log([block]))
-    assert c.landed == "lost"
+    assert c.landed_lost == "lost"

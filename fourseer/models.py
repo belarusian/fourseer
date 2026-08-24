@@ -433,7 +433,7 @@ class CycleClassification:
     mode: str
     gate: str | None = None
     merged: bool | None = None
-    landed: str | None = None
+    landed_lost: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -455,7 +455,7 @@ class TaxonomySummary:
     - ``sum(mode_counts.values()) == cycle_count`` (every cycle has a mode).
     - ``sum(gate_counts.values()) + gate_unknown == cycle_count``.
     - ``sum(merged_counts.values()) + merged_unknown == cycle_count``.
-    - ``sum(landed_counts.values()) + landed_unknown == cycle_count``.
+    - ``sum(landed_lost_counts.values()) + landed_lost_unknown == cycle_count``.
 
     Attributes
     ----------
@@ -477,12 +477,12 @@ class TaxonomySummary:
     merged_unknown:
         The number of cycles whose ``merged`` is ``None`` (no matching Results
         table).
-    landed_counts:
+    landed_lost_counts:
         A mapping of each non-``None`` landed tag (``"landed"`` / ``"lost"`` /
         ``"unknown"``) to the number of cycles with that tag. Only tags that
         actually occur appear as keys.
-    landed_unknown:
-        The number of cycles whose ``landed`` is ``None`` (not derivable, e.g.
+    landed_lost_unknown:
+        The number of cycles whose ``landed_lost`` is ``"unknown"`` (not derivable, e.g.
         the cycle was not classified against a gate log).
     """
 
@@ -492,8 +492,8 @@ class TaxonomySummary:
     gate_unknown: int = 0
     merged_counts: dict[str, int] = field(default_factory=dict)
     merged_unknown: int = 0
-    landed_counts: dict[str, int] = field(default_factory=dict)
-    landed_unknown: int = 0
+    landed_lost_counts: dict[str, int] = field(default_factory=dict)
+    landed_lost_unknown: int = 0
 
 
 @dataclass(frozen=True)

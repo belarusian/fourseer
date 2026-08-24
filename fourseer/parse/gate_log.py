@@ -64,7 +64,7 @@ _MERGED_ABSENT = {"", "—", "–", "-"}
 # CycleBlock.pr_numbers).
 _HEAD_END_PR_RE = re.compile(r"merge of PR #(?P<num>\d+)")
 # A "| PR #N | ..." Results-table row label (source (a) for pr_numbers).
-_PR_ROW_RE = re.compile(r"^pr #(?P<num>\d+)$")
+_PR_ROW_RE = re.compile(r"^pr #?(?P<num>\d+)$", re.IGNORECASE)
 # A "| CI (PR #N) | ..." Results-table row label (launch-gate gate_after).
 _CI_ROW_RE = re.compile(r"^ci \(pr #(?P<num>\d+)\)$")
 # A plain (non-table) line of the form ``PR #<n> MERGED ...`` (launch-gate
@@ -139,6 +139,8 @@ def _gate_status(result: str) -> str:
     it carries neither).
     """
     low = result.lower()
+    if "fail" in low:
+        return "red"
     if any(k in low for k in ("pass", "green", "ok")):
         return "green"
     return "red"
@@ -271,6 +273,16 @@ def _parse_cycle_blocks(lines: list[str]) -> list[CycleBlock]:
                         if ci_m is not None:
                             _add_pr(current, int(ci_m.group("num")))
                             if current["gate_after"] is None:
+                                current["gate_after"] = _gate_status(result)
+                        else:
+                            # Check for Merged on main / Merge commit on main rows
+                            if label in ("merged on main", "merge commit on main"):
+                                if result.strip() not in _MERGED_ABSENT:
+                                    current["merged"] = True
+                            # Generic 2-col row: check if it's a gate row
+                            elif "pytest" in label or "build+test" in label or label in (
+                                "gate", "build"
+                            ):
                                 current["gate_after"] = _gate_status(result)
             continue
 
