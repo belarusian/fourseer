@@ -24,6 +24,14 @@ numbered or ``-`` bullet items) stands in for ``### Lessons``; a two-column
 its pytest row to ``gate_after``; and a ``**Delivery:**`` line naming a merge
 into ``main`` sets ``merged`` to ``True``.
 
+A launch-gate ``### Results`` table uses two columns (``| Check | Result |``)
+rather than three. A ``| PR #N | ... |`` row records the PR number and sets
+``merged`` to ``True`` when the Result cell carries ``MERGED``; a
+``| CI (PR #N) | <status> |`` row records the PR number and, when ``gate_after``
+is not already set, maps the status to ``"green"`` / ``"red"``. PR numbers are
+also captured from a ``**HEAD (end):** ... merge of PR #N ...`` line; the
+deduplicated, ascending set is stored on ``CycleBlock.pr_numbers``.
+
 Parsing is pure and deterministic. The remaining free-form prose (``### What We
 Did``) is ignored.
 """
@@ -51,6 +59,14 @@ _DELIVERY_RE = re.compile(r"""^\*\*Delivery:.*->\s*[`'"]?main\b""")
 
 # A "Merged on main" After cell that is one of these means "not merged".
 _MERGED_ABSENT = {"", "—", "–", "-"}
+
+# A "merge of PR #N" reference in a **HEAD (end):** line (source (b) for
+# CycleBlock.pr_numbers).
+_HEAD_END_PR_RE = re.compile(r"merge of PR #(?P<num>\d+)")
+# A "| PR #N | ..." Results-table row label (source (a) for pr_numbers).
+_PR_ROW_RE = re.compile(r"^pr #(?P<num>\d+)$")
+# A "| CI (PR #N) | ..." Results-table row label (launch-gate gate_after).
+_CI_ROW_RE = re.compile(r"^ci \(pr #(?P<num>\d+)\)$")
 
 
 def parse_gate_log(text: str) -> GateLog:
@@ -101,6 +117,29 @@ def _parse_merged_cell(after: str) -> bool:
     return after.strip() not in _MERGED_ABSENT
 
 
+def _add_pr(current: dict, num: int) -> None:
+    """Record a PR number on the block accumulator, deduplicated.
+
+    The final list is sorted ascending at block materialization; this helper
+    only guards against duplicates.
+    """
+    if num not in current["pr_numbers"]:
+        current["pr_numbers"].append(num)
+
+
+def _gate_status(result: str) -> str:
+    """Map a launch-gate ``CI (PR #N)`` Result cell to a gate tag.
+
+    ``"green"`` when the cell carries a pass / green / ok marker, ``"red"``
+    when it carries a fail / red marker (and as the conservative default when
+    it carries neither).
+    """
+    low = result.lower()
+    if any(k in low for k in ("pass", "green", "ok")):
+        return "green"
+    return "red"
+
+
 def _parse_cycle_blocks(lines: list[str]) -> list[CycleBlock]:
     """Extract every ``## Cycle N`` block with its structured fields.
 
@@ -127,6 +166,7 @@ def _parse_cycle_blocks(lines: list[str]) -> list[CycleBlock]:
                     lessons=current["lessons"],
                     gate_after=current["gate_after"],
                     merged=current["merged"],
+                    pr_numbers=sorted(current["pr_numbers"]),
                 )
             )
             current = None
@@ -147,6 +187,7 @@ def _parse_cycle_blocks(lines: list[str]) -> list[CycleBlock]:
                 "lessons": [],
                 "gate_after": None,
                 "merged": None,
+                "pr_numbers": [],
             }
             in_lessons = False
             in_results = False
@@ -193,6 +234,7 @@ def _parse_cycle_blocks(lines: list[str]) -> list[CycleBlock]:
             if row_match is not None and not _TABLE_SEP_RE.match(line):
                 cells = [c.strip() for c in row_match.group(1).split("|")]
                 if len(cells) >= 3:
+                    # Seed dialect: three columns (Check | Before | After).
                     label = cells[0].lower()
                     after = cells[2]
                     if label == "gate (build+test+lint)":
@@ -201,6 +243,21 @@ def _parse_cycle_blocks(lines: list[str]) -> list[CycleBlock]:
                             current["gate_after"] = low
                     elif label == "merged on main":
                         current["merged"] = _parse_merged_cell(after)
+                elif len(cells) == 2:
+                    # Launch-gate dialect: two columns (Check | Result).
+                    label = cells[0].lower()
+                    result = cells[1]
+                    pr_m = _PR_ROW_RE.match(label)
+                    if pr_m is not None:
+                        _add_pr(current, int(pr_m.group("num")))
+                        if "merged" in result.lower():
+                            current["merged"] = True
+                    else:
+                        ci_m = _CI_ROW_RE.match(label)
+                        if ci_m is not None:
+                            _add_pr(current, int(ci_m.group("num")))
+                            if current["gate_after"] is None:
+                                current["gate_after"] = _gate_status(result)
             continue
 
         if not in_lessons:
@@ -215,6 +272,9 @@ def _parse_cycle_blocks(lines: list[str]) -> list[CycleBlock]:
             hem = _HEAD_END_RE.match(line)
             if hem:
                 current["head_end"] = hem.group("val")
+                # Source (b) for pr_numbers: a "merge of PR #N" reference.
+                for pr in _HEAD_END_PR_RE.finditer(hem.group("val")):
+                    _add_pr(current, int(pr.group("num")))
                 continue
             if _DELIVERY_RE.match(line):
                 current["merged"] = True
