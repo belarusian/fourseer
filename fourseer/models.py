@@ -182,6 +182,11 @@ class CycleBlock:
         carries a commit hash / PR reference, ``False`` when it is an em-dash
         or empty, and ``None`` when the block has no ``### Results`` table (or
         the row is absent).
+    pr_numbers:
+        The deduplicated, ascending list of PR numbers referenced by the
+        block. Captured from (a) a ``| PR #N | ... |`` row in the Results
+        table and (b) the ``**HEAD (end):** ... merge of PR #N ...`` line.
+        Empty when the block references no PR.
     """
 
     cycle_no: int
@@ -192,6 +197,7 @@ class CycleBlock:
     lessons: list[str] = field(default_factory=list)
     gate_after: str | None = None
     merged: bool | None = None
+    pr_numbers: list[int] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -411,12 +417,23 @@ class CycleClassification:
         The matching :class:`CycleBlock`'s ``merged`` (``True`` / ``False``),
         or ``None`` when the gate log has no matching block or the block has no
         ``### Results`` table.
+    landed:
+        The cycle's landed-vs-lost dimension, one of the closed set
+        ``"landed"`` / ``"lost"`` / ``"unknown"`` (or ``None`` when it cannot
+        be derived). ``"landed"`` when a matching gate-log block exists AND its
+        ``merged`` is ``True``; ``"lost"`` when the cycle ran (it is in
+        ``cycles.out``) but has no matching block OR its block carries no merge
+        evidence (``merged`` is not ``True``); ``"unknown"`` when a block
+        exists but ``merged`` is ``None`` (evidence incomplete). ``None`` when
+        the cycle was not classified against a gate log (no ``cycles.out``
+        context). See :func:`fourseer.taxonomy.classify_cycle`.
     """
 
     cycle_no: int
     mode: str
     gate: str | None = None
     merged: bool | None = None
+    landed: str | None = None
 
 
 @dataclass(frozen=True)
@@ -438,6 +455,7 @@ class TaxonomySummary:
     - ``sum(mode_counts.values()) == cycle_count`` (every cycle has a mode).
     - ``sum(gate_counts.values()) + gate_unknown == cycle_count``.
     - ``sum(merged_counts.values()) + merged_unknown == cycle_count``.
+    - ``sum(landed_counts.values()) + landed_unknown == cycle_count``.
 
     Attributes
     ----------
@@ -459,6 +477,13 @@ class TaxonomySummary:
     merged_unknown:
         The number of cycles whose ``merged`` is ``None`` (no matching Results
         table).
+    landed_counts:
+        A mapping of each non-``None`` landed tag (``"landed"`` / ``"lost"`` /
+        ``"unknown"``) to the number of cycles with that tag. Only tags that
+        actually occur appear as keys.
+    landed_unknown:
+        The number of cycles whose ``landed`` is ``None`` (not derivable, e.g.
+        the cycle was not classified against a gate log).
     """
 
     cycle_count: int
@@ -467,6 +492,8 @@ class TaxonomySummary:
     gate_unknown: int = 0
     merged_counts: dict[str, int] = field(default_factory=dict)
     merged_unknown: int = 0
+    landed_counts: dict[str, int] = field(default_factory=dict)
+    landed_unknown: int = 0
 
 
 @dataclass(frozen=True)
