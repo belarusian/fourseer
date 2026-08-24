@@ -99,15 +99,17 @@ def classify_cycle(
                 gate = block.gate_after
                 merged = block.merged
                 # The cycle ran (it is in the metrics) and a matching block
-                # exists: landed when merged, unknown when the merge evidence
-                # is incomplete (merged is None), lost when there is no merge
-                # evidence (merged is False).
-                if merged is True:
+                # exists. Merge evidence is ``merged is True`` OR
+                # ``pr_numbers`` non-empty: landed when present, lost when the
+                # block definitively says it was not merged (``merged is
+                # False``), unknown when the evidence is incomplete (``merged
+                # is None`` and no PR numbers).
+                if merged is True or block.pr_numbers:
                     landed = LANDED
-                elif merged is None:
-                    landed = UNKNOWN
-                else:
+                elif merged is False:
                     landed = LOST
+                else:
+                    landed = UNKNOWN
                 break
         else:
             # The cycle ran but has no matching gate-log block: lost.

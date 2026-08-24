@@ -67,6 +67,10 @@ _HEAD_END_PR_RE = re.compile(r"merge of PR #(?P<num>\d+)")
 _PR_ROW_RE = re.compile(r"^pr #(?P<num>\d+)$")
 # A "| CI (PR #N) | ..." Results-table row label (launch-gate gate_after).
 _CI_ROW_RE = re.compile(r"^ci \(pr #(?P<num>\d+)\)$")
+# A plain (non-table) line of the form ``PR #<n> MERGED ...`` (launch-gate
+# merge evidence, source (c) for pr_numbers). Column-anchored (``^PR``) so
+# indented prose such as ``  PR #17, CI green, merged ...`` never matches.
+_PR_MERGED_LINE_RE = re.compile(r"^PR\s+#(?P<num>\d+)\b.*\bMERGED\b", re.IGNORECASE)
 
 
 def parse_gate_log(text: str) -> GateLog:
@@ -194,6 +198,16 @@ def _parse_cycle_blocks(lines: list[str]) -> list[CycleBlock]:
             continue
 
         if current is None:
+            continue
+
+        # Launch-gate dialect: a plain (non-table) line ``PR #<n> MERGED ...``
+        # is merge evidence. Checked before the dialect-specific table
+        # handlers so it works whether or not a ``### Results`` header is
+        # present, and so the line is not re-interpreted by them.
+        pm = _PR_MERGED_LINE_RE.match(line)
+        if pm is not None:
+            _add_pr(current, int(pm.group("num")))
+            current["merged"] = True
             continue
 
         if _LESSONS_HEADER_RE.match(line):
