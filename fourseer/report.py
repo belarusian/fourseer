@@ -132,7 +132,10 @@ _USAGE_RE = re.compile(
 _PLACEHOLDER = "-"
 
 
-def render_report(metrics: list[CycleMetrics]) -> str:
+def render_report(
+    metrics: list[CycleMetrics],
+    landed_by_cycle: dict[int, str] | None = None,
+) -> str:
     """Render per-cycle metrics as a deterministic markdown table.
 
     The output is a pure, deterministic, stdlib-only string transformation of
@@ -141,7 +144,8 @@ def render_report(metrics: list[CycleMetrics]) -> str:
     - a header line ``# Per-Cycle Metrics (N cycles)`` where ``N`` is
       ``len(metrics)``;
     - a markdown table with columns ``Cycle | Outcome | Steps | Duration (s) |
-      Trajectory``;
+      Trajectory``; when *landed_by_cycle* is supplied, a trailing ``Landed``
+      column is added;
     - one row per metric, in the GIVEN order (the caller passes the already-
       sorted :func:`build_cycle_metrics` output); the renderer does NOT re-sort;
     - a ``None`` value (a kill's ``outcome``/``trajectory_name``, or the last
@@ -152,27 +156,41 @@ def render_report(metrics: list[CycleMetrics]) -> str:
     ----------
     metrics:
         The per-cycle metrics to render. The function never mutates it.
+    landed_by_cycle:
+        An optional mapping of ``cycle_no`` -> landed tag (``"landed"`` /
+        ``"lost"`` / ``"unknown"``). When supplied, a trailing ``Landed`` column
+        is rendered; a cycle absent from the mapping (or when the mapping is
+        ``None``) renders as ``-``. Never mutated.
 
     Returns
     -------
     str
         The rendered report (header + table), ending with a trailing newline.
     """
+    has_landed = landed_by_cycle is not None
     lines: list[str] = [
         f"# Per-Cycle Metrics ({len(metrics)} cycles)",
         "",
-        "| Cycle | Outcome | Steps | Duration (s) | Trajectory |",
-        "| --- | --- | --- | --- | --- |",
     ]
+    if has_landed:
+        lines.append("| Cycle | Outcome | Steps | Duration (s) | Trajectory | Landed |")
+        lines.append("| --- | --- | --- | --- | --- | --- |")
+    else:
+        lines.append("| Cycle | Outcome | Steps | Duration (s) | Trajectory |")
+        lines.append("| --- | --- | --- | --- | --- |")
     for m in metrics:
         outcome = m.outcome if m.outcome is not None else _PLACEHOLDER
         duration = (
             str(m.duration_seconds) if m.duration_seconds is not None else _PLACEHOLDER
         )
         trajectory = m.trajectory_name if m.trajectory_name is not None else _PLACEHOLDER
-        lines.append(
-            f"| {m.cycle_no} | {outcome} | {m.step_count} | {duration} | {trajectory} |"
-        )
+        row = f"| {m.cycle_no} | {outcome} | {m.step_count} | {duration} | {trajectory}"
+        if landed_by_cycle is not None:
+            tag = landed_by_cycle.get(m.cycle_no)
+            row += f" | {tag if tag is not None else _PLACEHOLDER} |"
+        else:
+            row += " |"
+        lines.append(row)
     return "\n".join(lines) + "\n"
 
 

@@ -176,8 +176,10 @@ def summarize_taxonomy(
     mode_counts: dict[str, int] = {}
     gate_counts: dict[str, int] = {}
     merged_counts: dict[str, int] = {}
+    landed_counts: dict[str, int] = {}
     gate_unknown = 0
     merged_unknown = 0
+    landed_unknown = 0
 
     for c in classifications:
         mode_counts[c.mode] = mode_counts.get(c.mode, 0) + 1
@@ -190,6 +192,10 @@ def summarize_taxonomy(
         else:
             key = "merged" if c.merged else "not_merged"
             merged_counts[key] = merged_counts.get(key, 0) + 1
+        if c.landed is None:
+            landed_unknown += 1
+        else:
+            landed_counts[c.landed] = landed_counts.get(c.landed, 0) + 1
 
     return TaxonomySummary(
         cycle_count=cycle_count,
@@ -198,6 +204,8 @@ def summarize_taxonomy(
         gate_unknown=gate_unknown,
         merged_counts=merged_counts,
         merged_unknown=merged_unknown,
+        landed_counts=landed_counts,
+        landed_unknown=landed_unknown,
     )
 
 
@@ -217,6 +225,9 @@ def render_taxonomy(summary: TaxonomySummary) -> str:
       when there are no cycles;
     - a ``merged:`` line listing each merge flag and its count, sorted by flag,
       followed by ``unknown: <n>`` when ``merged_unknown`` is non-zero, or
+      ``-`` when there are no cycles;
+    - a ``landed:`` line listing each landed tag and its count, sorted by tag,
+      followed by ``unknown: <n>`` when ``landed_unknown`` is non-zero, or
       ``-`` when there are no cycles.
 
     Parameters
@@ -262,5 +273,15 @@ def render_taxonomy(summary: TaxonomySummary) -> str:
     else:
         merged = _PLACEHOLDER
     lines.append(f"merged: {merged}")
+
+    if summary.landed_counts:
+        landed = ", ".join(
+            f"{tag}={summary.landed_counts[tag]}" for tag in sorted(summary.landed_counts)
+        )
+        if summary.landed_unknown:
+            landed += f", unknown={summary.landed_unknown}"
+    else:
+        landed = _PLACEHOLDER
+    lines.append(f"landed: {landed}")
 
     return "\n".join(lines) + "\n"
