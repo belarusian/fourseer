@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 from pathlib import PurePosixPath
 
-from fourseer.models import CycleMetrics, Run, RunSummary, Trajectory
+from fourseer.models import CycleClassification, CycleMetrics, Run, RunSummary, Trajectory
 
 __all__ = [
     "build_cycle_metrics",
@@ -134,7 +134,7 @@ _PLACEHOLDER = "-"
 
 def render_report(
     metrics: list[CycleMetrics],
-    landed_by_cycle: dict[int, str] | None = None,
+    classifications: list[CycleClassification] | None = None,
 ) -> str:
     """Render per-cycle metrics as a deterministic markdown table.
 
@@ -144,8 +144,9 @@ def render_report(
     - a header line ``# Per-Cycle Metrics (N cycles)`` where ``N`` is
       ``len(metrics)``;
     - a markdown table with columns ``Cycle | Outcome | Steps | Duration (s) |
-      Trajectory``; when *landed_by_cycle* is supplied, a trailing ``Landed``
-      column is added;
+      Trajectory | Landed``; when *classifications* is supplied, the ``Landed``
+      column shows each cycle's ``landed_lost`` tag (``landed`` / ``lost`` /
+      ``unknown``); otherwise, ``-``.
     - one row per metric, in the GIVEN order (the caller passes the already-
       sorted :func:`build_cycle_metrics` output); the renderer does NOT re-sort;
     - a ``None`` value (a kill's ``outcome``/``trajectory_name``, or the last
@@ -167,17 +168,13 @@ def render_report(
     str
         The rendered report (header + table), ending with a trailing newline.
     """
-    has_landed = landed_by_cycle is not None
+    has_class = classifications is not None
     lines: list[str] = [
         f"# Per-Cycle Metrics ({len(metrics)} cycles)",
         "",
+        "| Cycle | Outcome | Steps | Duration (s) | Trajectory | Landed |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
-    if has_landed:
-        lines.append("| Cycle | Outcome | Steps | Duration (s) | Trajectory | Landed |")
-        lines.append("| --- | --- | --- | --- | --- | --- |")
-    else:
-        lines.append("| Cycle | Outcome | Steps | Duration (s) | Trajectory |")
-        lines.append("| --- | --- | --- | --- | --- |")
     for m in metrics:
         outcome = m.outcome if m.outcome is not None else _PLACEHOLDER
         duration = (
@@ -185,11 +182,16 @@ def render_report(
         )
         trajectory = m.trajectory_name if m.trajectory_name is not None else _PLACEHOLDER
         row = f"| {m.cycle_no} | {outcome} | {m.step_count} | {duration} | {trajectory}"
-        if landed_by_cycle is not None:
-            tag = landed_by_cycle.get(m.cycle_no)
-            row += f" | {tag if tag is not None else _PLACEHOLDER} |"
+        if has_class:
+            # Find the classification for this cycle
+            tag = "-"
+            for c in classifications:
+                if c.cycle_no == m.cycle_no:
+                    tag = c.landed_lost
+                    break
+            row += f" | {tag} |"
         else:
-            row += " |"
+            row += " | - |"
         lines.append(row)
     return "\n".join(lines) + "\n"
 

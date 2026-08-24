@@ -179,23 +179,23 @@ def test_render_report_header_and_empty() -> None:
     text = render_report([])
     lines = text.splitlines()
     assert lines[0] == "# Per-Cycle Metrics (0 cycles)"
-    assert "| Cycle | Outcome | Steps | Duration (s) | Trajectory |" in lines
-    assert "| --- | --- | --- | --- | --- |" in lines
+    assert "| Cycle | Outcome | Steps | Duration (s) | Trajectory | Landed |" in lines
+    assert "| --- | --- | --- | --- | --- | --- |" in lines
     # No data rows.
-    assert not any(line.startswith("| ") and line != "| --- | --- | --- | --- | --- |"
-                   and "Cycle" not in line for line in lines[3:])
+    assert not any(line.startswith("| ") and line != "| --- | --- | --- | --- | --- | --- |"
+                   and "Cycle" not in line for line in lines[4:])
 
 
 def test_render_report_kill_row_placeholders() -> None:
     """A kill (outcome None, trajectory_name None) renders '-' in those columns."""
     text = render_report([_cm(21, None, 0, 3600, None)])
-    assert "| 21 | - | 0 | 3600 | - |" in text
+    assert "| 21 | - | 0 | 3600 | - | - |" in text
 
 
 def test_render_report_last_cycle_duration_placeholder() -> None:
     """The last cycle (duration_seconds None) renders '-' in the duration column."""
     text = render_report([_cm(28, "exit:task_complete", 39, None, "trajectory_0043.json")])
-    assert "| 28 | exit:task_complete | 39 | - | trajectory_0043.json |" in text
+    assert "| 28 | exit:task_complete | 39 | - | trajectory_0043.json | - |" in text
 
 
 def test_render_report_preserves_given_order() -> None:
@@ -211,9 +211,9 @@ def test_render_report_preserves_given_order() -> None:
     data_rows = [line for line in lines if line.startswith("| ") and "Cycle" not in line
                  and "---" not in line]
     assert data_rows == [
-        "| 10 | x | 1 | 10 | t10.json |",
-        "| 7 | x | 2 | 20 | t7.json |",
-        "| 8 | x | 3 | 30 | t8.json |",
+        "| 10 | x | 1 | 10 | t10.json | - |",
+        "| 7 | x | 2 | 20 | t7.json | - |",
+        "| 8 | x | 3 | 30 | t8.json | - |",
     ]
 
 
@@ -313,18 +313,18 @@ def test_real_seed_report(seed_dir) -> None:
     assert lines[0] == "# Per-Cycle Metrics (22 cycles)"
 
     # A normal row (cycle 7).
-    assert "| 7 | max_steps_reached | 82 | 3505 | trajectory_0013.json |" in lines
+    assert "| 7 | max_steps_reached | 82 | 3505 | trajectory_0013.json | - |" in lines
 
     # A wall-clock-kill row (cycle 21): outcome and trajectory render as '-'.
-    assert "| 21 | - | 0 | 3600 | - |" in lines
+    assert "| 21 | - | 0 | 3600 | - | - |" in lines
 
     # The last cycle (28): duration renders as '-'.
-    assert "| 28 | exit:task_complete | 39 | - | trajectory_0043.json |" in lines
+    assert "| 28 | exit:task_complete | 39 | - | trajectory_0043.json | - |" in lines
 
     # Exactly 22 data rows.
     data_rows = [line for line in lines if line.startswith("| ") and "Cycle" not in line
                  and "---" not in line]
-    assert len(data_rows) == 22
+    assert len(data_rows) == 22  # 22 data rows with Landed column
 
 # ---------------------------------------------------------------------------
 # summarize_run
