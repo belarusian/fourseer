@@ -64,3 +64,29 @@ def test_e2e_missing_dir_nonzero_and_stderr(tmp_path: Path) -> None:
     assert proc.returncode == 2
     assert proc.stdout == ""
     assert "not a directory" in proc.stderr
+
+
+# --- taxonomy on the committed launch-gate golden fixture (no seed required) --
+def test_e2e_taxonomy_landed_golden_fixture() -> None:
+    """``python -m fourseer taxonomy <launch-gate fixture>`` reports cycle 2 as
+    lost and cycle 5 as landed, with gates:/merged: populated (not ``-``)."""
+    fixture = Path(__file__).parent / "fixtures" / "launch_gate"
+    proc = _run_cli("taxonomy", str(fixture))
+    assert proc.returncode == 0
+    # The landed dimension distinguishes the two wall-clock kills.
+    assert "landed: landed=1, lost=1" in proc.stdout
+    # gates:/merged: are populated from the launch-gate dialect (not ``-``).
+    assert "gates: green=1, unknown=1" in proc.stdout
+    assert "merged: merged=1, unknown=1" in proc.stdout
+
+
+# --- report on the committed launch-gate golden fixture (no seed required) ----
+def test_e2e_report_landed_golden_fixture() -> None:
+    """``python -m fourseer report <launch-gate fixture>`` renders a ``Landed``
+    column showing cycle 2 as lost and cycle 5 as landed."""
+    fixture = Path(__file__).parent / "fixtures" / "launch_gate"
+    proc = _run_cli("report", str(fixture))
+    assert proc.returncode == 0
+    assert "| Cycle | Outcome | Steps | Duration (s) | Trajectory | Landed |" in proc.stdout
+    assert "| 2 | - | 0 | 7819 | - | lost |" in proc.stdout
+    assert "| 5 | - | 0 | - | - | landed |" in proc.stdout

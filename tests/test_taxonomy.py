@@ -19,6 +19,7 @@ rendered block: full / empty / no-unknown / determinism).
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 from fourseer.load import load_run
 from fourseer.models import (
@@ -522,3 +523,73 @@ def test_real_seed_taxonomy_summary(seed_dir) -> None:
     assert "modes: max_steps=7, task_complete=12, wall_clock_kill=3" in out
     assert "gates: green=20, unknown=2" in out
     assert "merged: merged=20, unknown=2" in out
+
+
+# ---------------------------------------------------------------------------
+# Landed/lost dimension (TICKET-058/059) on the committed golden fixture
+# ---------------------------------------------------------------------------
+
+_GOLDEN_FIXTURE = Path(__file__).parent / "fixtures" / "launch_gate"
+
+
+def test_golden_fixture_lost_vs_landed() -> None:
+    """On the committed launch-gate golden fixture, cycle 2 is LOST and cycle 5
+    is LANDED; both keep ``mode == "wall_clock_kill"`` (the landed dimension is
+    orthogonal to mode)."""
+    run = load_run(_GOLDEN_FIXTURE)
+    by_no = {c.cycle_no: c for c in classify_run(run)}
+
+    assert set(by_no) == {2, 5}
+    # Cycle 2: a wall-clock kill with NO gate-log block -> lost.
+    assert by_no[2].mode == "wall_clock_kill"
+    assert by_no[2].landed == "lost"
+    # Cycle 5: a wall-clock kill whose block carries merge evidence -> landed.
+    assert by_no[5].mode == "wall_clock_kill"
+    assert by_no[5].landed == "landed"
+
+
+def test_golden_fixture_landed_distribution_and_render() -> None:
+    """summarize_taxonomy tallies the landed dimension and render_taxonomy emits
+    a ``landed:`` line on the golden fixture (lost>=1, landed>=1)."""
+    run = load_run(_GOLDEN_FIXTURE)
+    s = summarize_taxonomy(classify_run(run))
+
+    assert s.landed_counts == {"landed": 1, "lost": 1}
+    assert s.landed_unknown == 0
+    # The partition invariant holds for the landed dimension.
+    assert sum(s.landed_counts.values()) + s.landed_unknown == s.cycle_count
+
+    out = render_taxonomy(s)
+    assert "landed: landed=1, lost=1" in out
+
+
+def test_landed_render_empty_placeholder() -> None:
+    """A summary with no derivable landed tags renders ``landed: -``."""
+    s = TaxonomySummary(
+        cycle_count=1,
+        mode_counts={"task_complete": 1},
+        gate_counts={},
+        gate_unknown=1,
+        merged_counts={},
+        merged_unknown=1,
+        landed_counts={},
+        landed_unknown=1,
+    )
+    out = render_taxonomy(s)
+    assert "landed: -" in out
+
+
+def test_landed_render_with_unknown_suffix() -> None:
+    """A summary with both a landed tag and an unknown renders the suffix."""
+    s = TaxonomySummary(
+        cycle_count=3,
+        mode_counts={"wall_clock_kill": 3},
+        gate_counts={},
+        gate_unknown=3,
+        merged_counts={},
+        merged_unknown=3,
+        landed_counts={"landed": 1, "lost": 1},
+        landed_unknown=1,
+    )
+    out = render_taxonomy(s)
+    assert "landed: landed=1, lost=1, unknown=1" in out
