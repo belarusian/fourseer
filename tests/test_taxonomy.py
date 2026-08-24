@@ -593,3 +593,22 @@ def test_landed_render_with_unknown_suffix() -> None:
     )
     out = render_taxonomy(s)
     assert "landed: landed=1, lost=1, unknown=1" in out
+
+
+def test_landed_when_block_has_pr_numbers_only() -> None:
+    """A block with pr_numbers non-empty (merged None) is landed.
+
+    Ticket 058: landed when the block carries merge evidence, i.e. ``merged is
+    True`` OR ``pr_numbers`` non-empty. PR numbers alone are sufficient.
+    """
+    block = CycleBlock(cycle_no=5, pr_numbers=[18], gate_after="green")  # merged None
+    c = classify_cycle(_metrics(5, None), _gate_log([block]))
+    assert c.mode == "wall_clock_kill"
+    assert c.landed == "landed"
+
+
+def test_lost_when_block_merged_false_even_with_no_prs() -> None:
+    """A block with merged False (no PR numbers) is lost."""
+    block = CycleBlock(cycle_no=4, merged=False, gate_after="red")
+    c = classify_cycle(_metrics(4, "max_steps_reached"), _gate_log([block]))
+    assert c.landed == "lost"

@@ -48,7 +48,7 @@ when one **landed** its work (merged a PR before the wall) and the other
 orthogonal per-cycle dimension, `landed`, in addition to `mode`:
 
 - **`landed`** — the cycle's gate-log block exists *and* carries merge evidence
-  (`merged is True`);
+  (`merged is True` or `pr_numbers` non-empty);
 - **`lost`** — the cycle ran (it appears in `cycles.out`) but has no gate-log
   block, or its block carries no merge evidence;
 - **`unknown`** — a block exists but the merge evidence is ambiguous
