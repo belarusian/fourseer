@@ -46,6 +46,12 @@ MODE_EXECUTION_ERROR = "execution_error"
 MODE_FORMAT_ERROR = "format_error"
 MODE_OTHER = "other"
 
+# The closed set of landed-vs-lost tags (documented on
+# :class:`CycleClassification.landed`).
+LANDED = "landed"
+LOST = "lost"
+UNKNOWN = "unknown"
+
 # The single stable placeholder for an empty distribution in the rendered block.
 _PLACEHOLDER = "-"
 
@@ -86,17 +92,32 @@ def classify_cycle(
     mode = _mode_from_outcome(metrics.outcome)
     gate: str | None = None
     merged: bool | None = None
+    landed: str | None = None
     if gate_log is not None:
         for block in gate_log.cycles:
             if block.cycle_no == metrics.cycle_no:
                 gate = block.gate_after
                 merged = block.merged
+                # The cycle ran (it is in the metrics) and a matching block
+                # exists: landed when merged, unknown when the merge evidence
+                # is incomplete (merged is None), lost when there is no merge
+                # evidence (merged is False).
+                if merged is True:
+                    landed = LANDED
+                elif merged is None:
+                    landed = UNKNOWN
+                else:
+                    landed = LOST
                 break
+        else:
+            # The cycle ran but has no matching gate-log block: lost.
+            landed = LOST
     return CycleClassification(
         cycle_no=metrics.cycle_no,
         mode=mode,
         gate=gate,
         merged=merged,
+        landed=landed,
     )
 
 
