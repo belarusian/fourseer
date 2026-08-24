@@ -168,7 +168,6 @@ def render_report(
     str
         The rendered report (header + table), ending with a trailing newline.
     """
-    has_class = classifications is not None
     lines: list[str] = [
         f"# Per-Cycle Metrics ({len(metrics)} cycles)",
         "",
@@ -182,7 +181,7 @@ def render_report(
         )
         trajectory = m.trajectory_name if m.trajectory_name is not None else _PLACEHOLDER
         row = f"| {m.cycle_no} | {outcome} | {m.step_count} | {duration} | {trajectory}"
-        if has_class:
+        if classifications is not None:
             # Find the classification for this cycle
             tag = "-"
             for c in classifications:
